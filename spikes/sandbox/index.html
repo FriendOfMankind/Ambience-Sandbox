@@ -2,46 +2,52 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Tarn Sandbox</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main>
-      <header class="top">
-        <div>
-          <h1>Tarn Sandbox</h1>
-          <p class="sub">Rain, wind, chimes and music from one shared world. Every sound is generated live; nothing loops.</p>
-        </div>
-      </header>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Instrument+Sans:wght@400;500;600&amp;display=swap" />
+    <canvas id="scene" aria-label="A glowing object above a dark lake, surrounded by contour-line hills. The object's shape and colour follow the music; chime strikes ring patterns across it; raindrops ripple the lake; the wind moves the haze and bends the lines."></canvas>
 
-      <section class="stage">
-        <canvas id="scene" aria-label="A lake at night. Ripples are raindrops, glowing tubes are chime strikes, orbs are music notes, coloured by pitch."></canvas>
-      </section>
-
-      <section class="transport">
+    <header id="top" class="top">
+      <div class="brand">
+        <h1>Tarn</h1>
+        <p class="sub">Every sound is generated live. The object is the music; the lake is the rain; the air is the wind.</p>
+      </div>
+      <div class="transport">
         <button id="play" class="primary">▶ Play</button>
         <label class="inline">Volume <input id="volume" type="range" min="-40" max="0" step="0.5" value="-10" /> <output id="volume-out">−10.0 dB</output></label>
+        <label class="inline">Scene <select id="scene-pick"></select></label>
         <label class="inline">Key <select id="scale"></select></label>
         <span class="seed">Seed <code id="seed"></code> <button id="reseed" title="A different version of the same world">New seed</button></span>
-      </section>
-      <p id="error" class="error" role="alert" hidden></p>
+      </div>
+      <div class="look">
+        <label class="inline trip" for="trip">Trip <input id="trip" type="range" min="0" max="1" step="0.01" value="0.6" /> <output id="trip-out" for="trip"></output></label>
+        <button id="motion" aria-pressed="false">Motion: full</button>
+        <button id="adv-toggle" aria-expanded="false" aria-controls="advanced">Advanced</button>
+      </div>
+    </header>
+    <p id="error" class="error" role="alert" hidden></p>
 
-      <section>
-        <h2 class="label">Scenes</h2>
-        <div id="scenes" class="wrap"></div>
-      </section>
+    <div id="dials" class="dials"></div>
 
+    <aside id="advanced" class="advanced" aria-label="Advanced controls" hidden>
+      <div class="adv-head">
+        <h2>Advanced</h2>
+        <button id="adv-close">Close</button>
+      </div>
+      <p class="adv-note">Every control for every layer. The dials around the object are the same controls.</p>
       <div id="strips" class="strips"></div>
-
       <section class="space-card">
         <h2 class="label">Space</h2>
         <div id="space" class="ctls"></div>
       </section>
+    </aside>
 
-      <pre id="status" class="status"></pre>
-    </main>
+    <pre id="status" class="status"></pre>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

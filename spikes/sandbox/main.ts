@@ -9,6 +9,8 @@ import { SURFACE_IDS, SURFACES } from '../../src/audio/nature/rain/surfaces';
 import { dbToGain, gainToDb } from '../../src/audio/dsp/loudness';
 import { SCENES, sceneState, stateToPatch, type SceneState } from './scenes';
 import { SceneView } from './view';
+import { LAYER_HUE, SceneView3D } from './view3d';
+import { dial, fromInput, inputRange, toInput, type SliderSpec } from './dials';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -76,6 +78,13 @@ async function ensureEngine(): Promise<Engine> {
 
 function send(patch: WorldParamsPatch): void {
   engine?.world.port.postMessage({ type: 'params', patch });
+  pushWorld();
+}
+
+/** World state the visuals need beyond the engine's events (rain rate, chime ring time…). */
+function pushWorld(): void {
+  const w = state.world;
+  view3d?.setWorld({ rainRate: w.rain.rate ?? 5, windAmount: w.wind.amount ?? 0.3, sustain: w.chimes.sustain ?? 1, chordSeconds: w.music.chordSeconds ?? 35 });
 }
 
 async function togglePlay(): Promise<void> {
@@ -133,21 +142,25 @@ function showError(text: string): void {
 
 // ------------------------------------------------------------------ controls
 
-interface SliderSpec {
-  id: string;
-  label: string;
-  min: number;
-  max: number;
-  step?: number;
-  log?: boolean;
-  get: () => number;
-  set: (v: number) => void;
-  fmt: (v: number) => string;
+/** Every control's spec by id, with its layer, so dials and strip sliders share one source. */
+const specs = new Map<string, { spec: SliderSpec; layer: LayerId | null; onChange: () => void }>();
+const syncers: (() => void)[] = [];
+const syncById = new Map<string, (() => void)[]>();
+let currentLayer: LayerId | null = null;
+
+function addSync(id: string, fn: () => void): void {
+  syncers.push(fn);
+  syncById.set(id, [...(syncById.get(id) ?? []), fn]);
+}
+/** A control changed: redraw every widget bound to it and tell the view which layer moved. */
+function changed(id: string): void {
+  syncById.get(id)?.forEach((f) => f());
+  const layer = specs.get(id)?.layer;
+  if (layer) view3d?.poke(layer);
 }
 
-const syncers: (() => void)[] = [];
-
 function slider(parent: HTMLElement, s: SliderSpec, onChange: () => void): void {
+  specs.set(s.id, { spec: s, layer: currentLayer, onChange });
   const wrap = document.createElement('div');
   wrap.className = 'ctl';
   const label = document.createElement('label');
@@ -158,24 +171,16 @@ function slider(parent: HTMLElement, s: SliderSpec, onChange: () => void): void 
   const input = document.createElement('input');
   input.type = 'range';
   input.id = s.id;
-  const RES = 1000;
-  const to = (v: number) => (s.log ? (Math.log(v / s.min) / Math.log(s.max / s.min)) * RES : v);
-  const from = (x: number) => (s.log ? s.min * Math.pow(s.max / s.min, x / RES) : x);
-  input.min = s.log ? '0' : String(s.min);
-  input.max = s.log ? String(RES) : String(s.max);
-  input.step = s.log ? '1' : String(s.step ?? (s.max - s.min) / 100);
-  const show = () => {
+  Object.assign(input, inputRange(s));
+  addSync(s.id, () => {
+    input.value = String(toInput(s, s.get()));
     out.textContent = s.fmt(s.get());
     input.setAttribute('aria-valuetext', s.fmt(s.get()));
-  };
-  syncers.push(() => {
-    input.value = String(to(s.get()));
-    show();
   });
   input.addEventListener('input', () => {
-    s.set(from(Number(input.value)));
-    show();
+    s.set(fromInput(s, Number(input.value)));
     onChange();
+    changed(s.id);
   });
   wrap.append(label, out, input);
   parent.append(wrap);
@@ -188,7 +193,7 @@ function toggle(parent: HTMLElement, id: string, text: string, get: () => boolea
   box.type = 'checkbox';
   box.id = id;
   box.addEventListener('change', () => { set(box.checked); onChange(); });
-  syncers.push(() => (box.checked = get()));
+  addSync(id, () => (box.checked = get()));
   label.append(box, ` ${text}`);
   parent.append(label);
 }
@@ -216,9 +221,9 @@ const LAYER_INFO: Record<LayerId, { title: string; blurb: string }> = {
 function buildStrips(): void {
   const root = $('strips');
   root.innerHTML = '';
-  syncers.length = 0;
 
   for (const id of LAYERS) {
+    currentLayer = id;
     const card = document.createElement('section');
     card.className = 'strip';
     card.dataset.layer = id;
@@ -235,12 +240,8 @@ function buildStrips(): void {
       onBtn.setAttribute('aria-pressed', String(isOn));
       card.classList.toggle('off', !isOn);
     };
-    onBtn.addEventListener('click', () => {
-      w().mix[id].on = !w().mix[id].on;
-      syncOn();
-      send({ mix: { [id]: { on: w().mix[id].on } } });
-    });
-    syncers.push(syncOn);
+    onBtn.addEventListener('click', () => togglePower(id));
+    addSync(`on-${id}`, syncOn);
     const meterEl = document.createElement('div');
     meterEl.className = 'meter';
     meterEl.innerHTML = `<span id="meter-${id}"></span>`;
@@ -322,6 +323,7 @@ function buildStrips(): void {
     root.append(card);
   }
 
+  currentLayer = null;
   // Space (reverb)
   const space = $('space');
   space.innerHTML = '';
@@ -331,14 +333,16 @@ function buildStrips(): void {
   slider(space, { id: 'rev-size', label: 'Space size', min: 0.5, max: 2, step: 0.01, get: () => w().reverb.size!, set: (v) => (w().reverb.size = v), fmt: times }, ch);
 }
 
+function togglePower(id: LayerId): void {
+  w().mix[id].on = !w().mix[id].on;
+  send({ mix: { [id]: { on: w().mix[id].on } } });
+  changed(`on-${id}`);
+}
+
 function buildScenes(): void {
-  const root = $('scenes');
-  SCENES.forEach((scene, i) => {
-    const b = document.createElement('button');
-    b.textContent = scene.label;
-    b.addEventListener('click', () => applyScene(i));
-    root.append(b);
-  });
+  const scenes = $<HTMLSelectElement>('scene-pick');
+  SCENES.forEach((scene, i) => scenes.add(new Option(scene.label, String(i))));
+  scenes.addEventListener('change', () => applyScene(Number(scenes.value)));
   const sel = $<HTMLSelectElement>('scale');
   for (const [k, s] of Object.entries(SCALES)) sel.add(new Option(s.label, k));
   sel.addEventListener('change', () => {
@@ -360,7 +364,8 @@ function applyScene(i: number): void {
 function syncAll(): void {
   syncers.forEach((s) => s());
   $<HTMLSelectElement>('scale').value = state.scaleKey;
-  document.querySelectorAll<HTMLButtonElement>('#scenes button').forEach((b, i) => b.classList.toggle('on', i === activeScene));
+  $<HTMLSelectElement>('scene-pick').value = String(activeScene);
+  pushWorld();
 }
 
 function updateTubes(): void {
@@ -377,6 +382,10 @@ function renderStatus(): void {
     const lvl = tick?.features.level[id] ?? 0;
     const db = gainToDb(lvl);
     el.style.width = `${Math.max(0, Math.min(100, ((db + 60) / 50) * 100))}%`;
+  }
+  for (const id of LAYERS) {
+    const el = document.getElementById(`cmeter-${id}`);
+    if (el) el.style.transform = `scaleX(${Math.max(0, Math.min(1, (gainToDb(tick?.features.level[id] ?? 0) + 60) / 50))})`;
   }
   const lines: string[] = [];
   if (engine) {
@@ -397,22 +406,168 @@ function renderStatus(): void {
 // ------------------------------------------------------------------ wiring
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-const view = new SceneView(
-  $<HTMLCanvasElement>('scene'),
-  () => {
-    const ctx = ctxSingleton;
-    if (!ctx) return performance.now() / 1000;
-    const ts = ctx.getOutputTimestamp?.();
-    return ts?.contextTime ?? ctx.currentTime - (ctx.outputLatency ?? 0);
-  },
-  () => reducedMotion.matches,
-);
+const audioNow = () => {
+  const ctx = ctxSingleton;
+  if (!ctx) return performance.now() / 1000;
+  const ts = ctx.getOutputTimestamp?.();
+  return ts?.contextTime ?? ctx.currentTime - (ctx.outputLatency ?? 0);
+};
+
+/** The 3D view where WebGL2 works; the 2D placeholder otherwise. */
+let view3d: SceneView3D | null = null;
+let view: { push: SceneView['push']; setTubes: SceneView['setTubes']; start: () => void };
+try {
+  if (!SceneView3D.supported()) throw new Error('no WebGL2');
+  view3d = new SceneView3D($<HTMLCanvasElement>('scene'), audioNow);
+  view = view3d;
+} catch {
+  document.body.classList.add('flat');
+  view = new SceneView($<HTMLCanvasElement>('scene'), audioNow, () => motionReduced());
+}
+
+// ------------------------------------------------------------------ dials
+
+/** The dials that float around the object, per layer. Everything else lives in Advanced. */
+const DIALS: Record<LayerId, string[]> = {
+  music: ['music-level', 'music-pad', 'music-keys', 'music-density'],
+  chimes: ['chimes-level', 'chime-tubes', 'chime-sustain', 'chime-sens'],
+  rain: ['rain-level', 'rain-rate', 'rain-size', 'rain-near'],
+  wind: ['wind-level', 'wind-amount', 'wind-gust', 'wind-rustle'],
+};
+const clusters: { layer: LayerId; el: HTMLElement }[] = [];
+
+function buildDials(): void {
+  const root = $('dials');
+  for (const layer of ['music', 'chimes', 'rain', 'wind'] as LayerId[]) {
+    const el = document.createElement('section');
+    el.className = 'cluster';
+    el.dataset.layer = layer;
+    el.style.setProperty('--hue', String(LAYER_HUE[layer]));
+    el.setAttribute('role', 'group');
+    el.setAttribute('aria-labelledby', `cl-${layer}`);
+    const head = document.createElement('header');
+    const h = document.createElement('h2');
+    h.id = `cl-${layer}`;
+    h.textContent = LAYER_INFO[layer].title;
+    const power = document.createElement('button');
+    power.className = 'cpower';
+    power.id = `con-${layer}`;
+    power.setAttribute('aria-label', `${LAYER_INFO[layer].title} sound`);
+    power.addEventListener('click', () => togglePower(layer));
+    addSync(`on-${layer}`, () => {
+      const on = w().mix[layer].on;
+      power.setAttribute('aria-pressed', String(on));
+      power.textContent = on ? 'On' : 'Off';
+      el.classList.toggle('off', !on);
+    });
+    const meterEl = document.createElement('div');
+    meterEl.className = 'cmeter';
+    meterEl.setAttribute('aria-hidden', 'true');
+    meterEl.innerHTML = `<span id="cmeter-${layer}"></span>`;
+    head.append(h, meterEl, power);
+    const row = document.createElement('div');
+    row.className = 'dial-row';
+    for (const id of DIALS[layer]) {
+      const entry = specs.get(id);
+      if (!entry) continue;
+      const sync = dial(row, entry.spec, () => {
+        entry.onChange();
+        changed(id);
+      });
+      addSync(id, sync);
+    }
+    el.append(head, row);
+    el.addEventListener('pointerenter', () => view3d?.setFocus(layer));
+    el.addEventListener('pointerleave', () => { if (!el.contains(document.activeElement)) view3d?.setFocus(null); });
+    el.addEventListener('focusin', () => view3d?.setFocus(layer));
+    el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget as Node)) view3d?.setFocus(null); });
+    root.append(el);
+    clusters.push({ layer, el });
+  }
+}
+
+/** Float each cluster at its anchor in the scene, kept inside the viewport and clear of the top bar. */
+function placeDials(): void {
+  requestAnimationFrame(placeDials);
+  const docked = !view3d || window.innerWidth < 820 || window.innerHeight < 520;
+  document.body.classList.toggle('docked', docked);
+  if (docked || !view3d) {
+    clusters.forEach(({ el }) => (el.style.transform = ''));
+    return;
+  }
+  const top = $('top').getBoundingClientRect().bottom + 12;
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  for (const { layer, el } of clusters) {
+    const a = view3d.anchor(layer);
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const x = Math.min(W - 16 - w, Math.max(16, a.x - w / 2));
+    const y = Math.min(H - 40 - h, Math.max(top, a.y - h / 2));
+    el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+  }
+}
+
+// ------------------------------------------------------------------ trip, motion, advanced
+
+const store = {
+  get(k: string): string | null { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k: string, v: string): void { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
+};
+let motionChoice: boolean | null = store.get('tarn.reduced') === null ? null : store.get('tarn.reduced') === '1';
+const motionReduced = () => motionChoice ?? reducedMotion.matches;
+
+function syncMotion(): void {
+  const on = motionReduced();
+  const b = $('motion');
+  b.setAttribute('aria-pressed', String(on));
+  b.textContent = on ? 'Motion: reduced' : 'Motion: full';
+  view3d?.setReduced(on);
+  document.body.classList.toggle('calm', on);
+}
+
+function initChrome(): void {
+  const trip = $<HTMLInputElement>('trip');
+  const saved = Number(store.get('tarn.trip'));
+  trip.value = String(Number.isFinite(saved) && store.get('tarn.trip') !== null ? saved : 0.6);
+  const showTrip = () => {
+    const v = Number(trip.value);
+    const word = v < 0.25 ? 'still' : v < 0.5 ? 'drifting' : v < 0.8 ? 'trippy' : 'folded';
+    $('trip-out').textContent = `${Math.round(v * 100)} · ${word}`;
+    trip.setAttribute('aria-valuetext', `${Math.round(v * 100)} percent, ${word}`);
+    view3d?.setTrip(v);
+  };
+  trip.addEventListener('input', () => { showTrip(); store.set('tarn.trip', trip.value); });
+  showTrip();
+
+  $('motion').addEventListener('click', () => {
+    motionChoice = !motionReduced();
+    store.set('tarn.reduced', motionChoice ? '1' : '0');
+    syncMotion();
+  });
+  reducedMotion.addEventListener('change', syncMotion);
+  syncMotion();
+
+  const adv = $('advanced');
+  const advBtn = $('adv-toggle');
+  const setAdv = (open: boolean) => {
+    adv.hidden = !open;
+    advBtn.setAttribute('aria-expanded', String(open));
+    if (open) $('adv-close').focus();
+    else advBtn.focus();
+  };
+  advBtn.addEventListener('click', () => setAdv(adv.hidden === true));
+  $('adv-close').addEventListener('click', () => setAdv(false));
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !adv.hidden) setAdv(false); });
+}
 
 function init(): void {
   buildScenes();
   buildStrips();
+  buildDials();
   syncAll();
   updateTubes();
+  initChrome();
   $('seed').textContent = seed;
   $('play').addEventListener('click', () => void togglePlay());
   $('reseed').addEventListener('click', () => void reseed());
@@ -432,6 +587,7 @@ function init(): void {
   setInterval(renderStatus, 200);
   renderStatus();
   view.start();
+  placeDials();
 }
 
 init();

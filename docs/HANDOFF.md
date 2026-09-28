@@ -2,31 +2,22 @@
 
 Where things stand, so the next session can pick up without re-reading the whole chat.
 
-## Start here: next session is the visuals
+## Start here: visuals prototype v1 is built; get the user's reaction
 
-Decision (user, end of session 1): **audio tuning is parked; work on the visuals next.** The direction is already decided (PLAN §11, D10): a trippy, synaesthetic **3D object** that changes shape and colour with the sounds, with **floating dials** around it that open each layer's controls. What is *not* decided is the visual grammar. Ask the user before designing; they want to be asked, not guessed at. Questions worth putting to them first: what the object is and how abstract it should be, one or two reference looks, how calm vs. trippy it gets, and whether the dials replace the current layer strips or sit alongside them.
+Session 2 (2026-09-28) built the synaesthetic 3D view. The design, grammar, safety measures and known limits are in **docs/VISUALS.md**; read that first.
 
-**What exists**
-- `spikes/sandbox/view.ts`: a 2D canvas placeholder. Pitch class → hue (`pitchHue`, same note = same colour in any octave), ripples for drops, glowing tubes for chime strikes, orbs for music notes, the sky hue shifting on chord changes. It is the seed of the mapping, not the design.
-- The engine already reports what a visual needs, per sound, not from a mixed FFT (PLAN §5.3):
-  - `WorldEvents.rain[]`: `{frame, pan, diameterMm, surface, bubbleHz}` (near drops only, at most 200 per tick)
-  - `WorldEvents.chimes[]`: `{frame, tube, velocity}`
-  - `WorldEvents.music[]`: `{kind: 'note' | 'chord', frame, hz, velocity, step}`
-  - `WorldFeatures`: per-layer smoothed `level`, `windSpeed`, `gust`, `chordStep`
-  - Ticks arrive about every 16 ms from the worklet with `frame` and `time`, so an event's audio-clock time is `msg.time + (event.frame − msg.frame) / sampleRate`. `SceneView.push(events, features, timeOf)` and `main.ts` show the wiring; `ctx.getOutputTimestamp()` gives the audio clock to draw against.
-- The Lab (`spikes/lab/`) has no visual. Adding the new visual there too, so each test shows what that one sound looks like, is an option.
+- User's direction: trippy and psychedelic but sleek and luxurious; the object should be "an enigma of crazy lines and shapes"; the dials should feel part of the environment, with the shape morphing as you edit. They approved the per-layer grammar, dials **replacing** the strips (everything else lives under Advanced), the kaleidoscope **only at high Trip**, and **Trip 60** as the default.
+- Code: `spikes/sandbox/view3d.ts` (the view), `shaders.ts`, `dials.ts`, `flash.ts` (WCAG flash meter). `main.ts` now builds the full-screen layout. The 2D `view.ts` stays as the fallback when WebGL2 is missing.
+- Checks: `npm test` (includes `tests/flash.test.ts`), `node scripts/flash-check.mjs` (fixed-clock stress test of the real renderer, with a must-fail strobe control), `node scripts/visual-preview.mjs <dir> [trip] [w] [h] [ui]` (deterministic stills; `HIDE=shell,cage,…` isolates parts), `node scripts/visual-check.mjs` (real-time run with audio).
+- **Not verified:** frame rate on a real GPU (the container only has software GL at ~0.5 fps), and real screen-reader use. Ask the user for an fps reading (`__tarnVisual.stats()` in the console) on their machine.
+- Branch: `claude/kind-clarke-lpoa37` (continues `claude/sleepy-ptolemy-04oiyd`).
+- The user rejected nothing yet; wait for their reaction to the screenshots and the published artifact before tuning further. Candidate next steps: make the hills read as mountains, a more sculptural shell (fewer ball-like poses), a Focus-mode preset of Trip, and adding the visual to the Lab.
 
-**Design work still owed (from D10):** per-layer visual grammar (rain, wind, chimes, music each need their own language), Focus-mode calming, reduced motion, **flash safety** (no more than 3 flashes a second, no large-area strobing), and keyboard and screen-reader access for the dials. Prototype in Three.js/WebGL driven by the events and features above. The artifact build (`scripts/build-artifact.mjs`) bundles a page's `main.ts` into one inline script, so an npm dependency such as `three` gets bundled in (expect a few hundred KB).
+**Parked, not forgotten:** audio tuning from the Lab feedback (see "Lab feedback, round 1" below).
 
-**Constraints and lessons**
-- The audio thread must never be starved. Keep visuals off it, and keep the frame budget honest (60 fps desktop). Lesson from this session: `AudioWorkletNode.disconnect()` does *not* stop a processor; post `{type: 'stop'}` (handled in `world.worklet.ts`) before dropping a node, or it keeps rendering.
-- Claude cannot hear audio. Anything audio-related is verified by measurement only (offline renders, spectra) and needs the user's ears. Visuals can be checked by screenshot.
-- Testing in a real browser: Playwright is installed and Chromium is at `/opt/pw-browsers/chromium`. `AudioWorklet` needs a secure context, so serve the built page with `page.route('http://localhost:4173/…')` rather than `setContent`. Build pages with `npm run build:artifact` (sandbox) or `npm run build:lab`.
-- Artifact rules: inline everything, only cdnjs/jsdelivr scripts, no downloads (inert), `localStorage` for per-viewer state only.
-- Published: Tarn Lab at https://claude.ai/artifact/9R9E3oy5W6uiaPzY38eThq (version 2 has the leak fix). The sandbox artifact was published in an earlier chat; its URL isn't recorded here, and it needs republishing to get the same fix.
-- Branch: `claude/sleepy-ptolemy-04oiyd`.
+### Background kept from session 1
 
-**Parked, not forgotten:** audio tuning from the Lab feedback (see "Lab feedback, round 1" below). The user said "we can dial in the sounds later".
+The engine reports per-sound events: `WorldEvents.rain[]` `{frame, pan, diameterMm, surface, bubbleHz}`, `.chimes[]` `{frame, tube, velocity}`, `.music[]` `{kind, frame, hz, velocity, step}`, and `WorldFeatures` `{level, windSpeed, gust, chordStep}`. An event's audio time is `msg.time + (event.frame − msg.frame) / sampleRate`. Keep visuals off the audio thread. `AudioWorkletNode.disconnect()` does not stop a processor; post `{type: 'stop'}` first. Artifact rules: inline everything; only cdnjs/jsdelivr scripts; downloads are inert. Tarn Lab: https://claude.ai/artifact/9R9E3oy5W6uiaPzY38eThq. Tarn Sandbox with the 3D view: https://claude.ai/artifact/EmgHKG7SRPbddKAt3WWwQw.
 
 ## Built
 
@@ -55,7 +46,7 @@ Desktop-first; non-commercial; rain fully synthetic (no recordings); layers are 
 - Scene changes cut instantly; a smooth morph is planned but not built. Scenes are level-trimmed, but not loudness-matched.
 - All synth constants are initial guesses; only the leaves are level-calibrated by measurement. Nothing has been tuned by listening beyond the user's comments above.
 - There's no persistence, no save/share link and no Focus mode or timer yet (PLAN M6/M7).
-- The visual is a 2D placeholder with a pitch → hue mapping.
+- The 3D visual's frame rate is unmeasured on real hardware.
 
 ## Tarn Lab (added after the first version of this handoff)
 
@@ -74,7 +65,7 @@ Objective levels measured while building it (20 s renders, RMS / peak before the
 
 ## Suggested next steps
 
-1. **Visuals** (this is next; see "Start here" at the top). Get the user's direction first, then prototype the 3D object and per-layer mappings.
+1. **Visuals**: prototype v1 built (see "Start here" and docs/VISUALS.md); iterate on the user's reaction.
 2. Audio tuning, parked. Re-rate the "static" tests in the Lab with the leak fix, then act on the round-1 findings: level-match gale / whistle / downpour / wood and bright chimes, fix the surface-blind rain wash (open question to the user: should grass be a real hush, or as distinct as tin?), lower the bubble pitch/squeak, make the leaf flutters less regular. Rate the music keys / both / Lydian and the 8 scenes, which have not been heard.
 3. Scene morphing (parameter interpolation) and loudness-matched scenes.
 4. Save/share: URL-encoded world + seed (PLAN §7.8).
