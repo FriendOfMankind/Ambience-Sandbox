@@ -184,3 +184,22 @@ describe('WorldSynth', () => {
     expect(f.level.music).toBeLessThan(1e-3);
   });
 });
+
+describe('Leaves', () => {
+  it('leaves add sound that grows with the wind, and none when set to zero', () => {
+    const rms = (rustle: number, amount: number) => {
+      const w = new WindSynth(FS, 'leaf', { amount, rustle, whistle: 0, gustiness: 0 });
+      const base = new WindSynth(FS, 'leaf', { amount, rustle: 0, whistle: 0, gustiness: 0 });
+      const l = new Float32Array(B), r = new Float32Array(B), l2 = new Float32Array(B), r2 = new Float32Array(B);
+      let sq = 0;
+      for (let i = 0; i < (6 * FS) / B; i++) {
+        w.process(l, r, B);
+        base.process(l2, r2, B);
+        if (i * B > FS) for (let n = 0; n < B; n++) sq += (l[n] - l2[n]) ** 2;
+      }
+      return Math.sqrt(sq / (5 * FS));
+    };
+    expect(rms(0, 0.6)).toBe(0);
+    expect(rms(1, 0.8)).toBeGreaterThan(rms(1, 0.2) * 1.5);
+  });
+});

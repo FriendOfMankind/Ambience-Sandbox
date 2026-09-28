@@ -3,7 +3,7 @@
  *
  * - body:    noise through a resonant band-pass whose centre and level rise with wind speed
  * - whistle: narrow resonances (wind past edges, pine needles) that appear in strong gusts
- * - rustle:  bright, crackly leaf noise whose density follows the wind
+ * - leaves:  a swelling tree canopy plus individual leaves fluttering nearby (see Leaves)
  *
  * Wind speed = amount × (1 + gusts). Gusts are two Ornstein–Uhlenbeck processes (fast
  * gusts plus slow swells). Other layers read `gust` and `speed` so the rain sheets and the
@@ -12,6 +12,7 @@
  */
 
 import { createRng, type Rng } from '../../../core/rng';
+import { Leaves } from './Leaves';
 
 export interface WindParams {
   /** Base wind strength 0..1 (calm → strong). */
@@ -20,7 +21,7 @@ export interface WindParams {
   gustiness: number;
   /** Level of whistling resonances in strong gusts 0..1. */
   whistle: number;
-  /** Level of leaf rustle 0..1. */
+  /** Level of leaves (canopy + flutters) 0..1. */
   rustle: number;
   /** Overall brightness shift in octaves (−1..1). */
   tone: number;
@@ -77,14 +78,11 @@ export class WindSynth {
   private readonly bodyR = new Svf();
   private readonly whistleA = new Svf();
   private readonly whistleB = new Svf();
-  private readonly rustleHp = new Svf();
   private brownL = 0;
   private brownR = 0;
   private bodyAmp = 0;
   private whistleAmp = 0;
-  private rustleEnv = 0;
-  private rustleTarget = 0;
-  private rustleHold = 0;
+  private readonly leaves: Leaves;
   private whistlePan = 0;
 
   constructor(
@@ -94,6 +92,7 @@ export class WindSynth {
   ) {
     this.rng = createRng(seed, 'wind.noise');
     this.rngGust = createRng(seed, 'wind.gust');
+    this.leaves = new Leaves(fs, createRng(seed, 'wind.leaves'));
     this.setParams(params ?? {});
     this.speed = this.p.amount;
   }
@@ -131,15 +130,10 @@ export class WindSynth {
     const fw = (700 + 900 * s) * toneMul;
     this.whistleA.set(fw, 18, fs);
     this.whistleB.set(fw * 1.49, 22, fs);
-    this.rustleHp.set(4500 * toneMul, 0.6, fs);
 
     const targetBody = 0.9 * Math.pow(Math.min(s, 2), 1.4);
     const targetWhistle = p.whistle * 1.6 * Math.pow(Math.max(0, s - 0.35), 2);
-    const rustleDensity = Math.min(1, s * 1.3);
     const smooth = 1 - Math.exp(-1 / (0.08 * fs));
-    const rustleSmooth = 1 - Math.exp(-1 / (0.003 * fs));
-    // Rustle envelope changes target at a random 20–80 Hz rate.
-    const holdSamples = Math.round(fs / (20 + 60 * rustleDensity));
     this.whistlePan += (this.rng.next() - 0.5) * 0.02;
     this.whistlePan = Math.max(-0.6, Math.min(0.6, this.whistlePan));
     const wl = Math.cos(((this.whistlePan + 1) * Math.PI) / 4);
@@ -159,24 +153,17 @@ export class WindSynth {
       const wn = this.rng.next() * 2 - 1;
       const w = (this.whistleA.bp(wn) + 0.6 * this.whistleB.bp(wn)) * this.whistleAmp;
 
-      if (--this.rustleHold <= 0) {
-        this.rustleHold = holdSamples;
-        const r = this.rng.next();
-        // Mostly quiet with occasional bright bursts: cube the random value.
-        this.rustleTarget = r * r * r * rustleDensity;
-      }
-      this.rustleEnv += (this.rustleTarget - this.rustleEnv) * rustleSmooth;
-      const rn = this.rustleHp.bp(this.rng.next() * 2 - 1) * this.rustleEnv * p.rustle * 1.4;
-
-      outL[n] = bl + w * wl + rn * 0.8;
-      outR[n] = br + w * wr + rn * 0.6;
+      outL[n] = bl + w * wl;
+      outR[n] = br + w * wr;
     }
+    this.leaves.process(outL, outR, frames, s, p.rustle, toneMul);
 
     if (!Number.isFinite(this.bodyAmp)) this.resetState();
   }
 
   private resetState(): void {
-    for (const f of [this.bodyL, this.bodyR, this.whistleA, this.whistleB, this.rustleHp]) f.reset();
-    this.brownL = this.brownR = this.bodyAmp = this.whistleAmp = this.rustleEnv = 0;
+    for (const f of [this.bodyL, this.bodyR, this.whistleA, this.whistleB]) f.reset();
+    this.brownL = this.brownR = this.bodyAmp = this.whistleAmp = 0;
+    this.leaves.reset();
   }
 }
