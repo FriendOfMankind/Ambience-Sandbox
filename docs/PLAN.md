@@ -740,6 +740,40 @@ flowchart LR
 5. Encode (AAC 128–160 kbps stereo beds; 96 kbps mono one-shots).
 6. Output `manifest.json`: file, duration, LUFS, peak, tags, licence, source URL, author.
 
+### 8.1.1 Rain recording brief (self-recorded)
+
+**Targets for Tarn:**
+
+| Bed | Minimum usable | Ideal |
+|---|---|---|
+| Rain **light** (drizzle, sparse drops) | 5 min | 15+ min |
+| Rain **medium** (steady) | 5 min | 20+ min |
+| Rain **heavy** (downpour) | 3 min | 10+ min |
+| **Rain on water** (pond, lake edge, even a wide tub or water butt) | 3 min | 10 min |
+| **One-shots:** gutter drips, single fat drops on leaves/stone | 30 clean hits | 100 |
+
+Bonus material for Rainy Window later: rain on glass (mic taped near an inside window), on a metal sill, on a tin roof.
+
+**Consistency matters more than quantity.** Each intensity has to crossfade with the others seamlessly, so record all three from the **same spot, with the same gear and the same gain**. Note the position (photo it) and reuse it every time it rains.
+
+**Placement:**
+- Keep the mic **dry and out of direct hits**: under an eave, a porch roof or an open shed door, pointing out. An umbrella over the mic is a trap; you'll record rain-on-fabric, which is loud and sounds like crinkling.
+- Aim for a **mix of surfaces** in front of you: grass, leaves, stone. Rain on a single hard surface sounds like frying.
+- **Distance from drips:** a close gutter drip right by the mic dominates everything. Move until no single drip stands out, and record the drips separately as one-shots.
+
+**Gear, in rough order of quality:**
+1. A handheld recorder with 32-bit float (no clipping on thunder), recording WAV at 48 kHz.
+2. A phone with an external mic or recording app that lets you **turn off auto-gain and noise reduction.** Phone voice-memo apps run noise suppression that treats rain as noise to remove and pumps the level. If you can't disable it, don't use the recording.
+- A foam windshield at minimum; a furry one if there's any wind.
+
+**Takes:**
+- Long takes (10–30 min) and **don't touch the recorder** once it's running. Walk away; handling noise ruins 20 s either side.
+- Avoid traffic peaks, lawnmowers, voices and planes. Early morning or late evening is quietest. Note bad moments with timestamps (or just clap once far away, which is easy to find and cut later).
+- Record **30 s of "room"** (same spot, no rain) if you can. It helps the pipeline match noise floors between takes.
+- Thunder: if you catch it, great; it goes straight into the thunder one-shot pool.
+
+**Deliver** raw WAVs plus a one-line note per file (date, intensity, spot, anything noisy). The asset pipeline (§8.1 steps 1–6) does the cleaning, segmenting and loudness matching.
+
 ### 8.2 Instruments
 
 - **Synthesis first.** Pad, pluck, pulse, texture and noise are all synthesized, which is rights-free and parametric.
@@ -826,7 +860,7 @@ flowchart LR
 
 | Spike | What | Acceptance |
 |---|---|---|
-| **S1 Loop-free rain bed** | BedPlayer prototype on a real rain recording (CC0 or your own), with segment + shuffle + crossfade | Blind test: 3+ listeners, 20 min each, fewer than 1 "repeat!" press per 10 min. No clicks at crossfades |
+| **S1 Loop-free rain bed** | BedPlayer prototype on a real rain recording (free placeholder first, swapped for your own recordings as they arrive), with segment + shuffle + crossfade | Blind test: 3+ listeners, 20 min each, fewer than 1 "repeat!" press per 10 min. No clicks at crossfades |
 | **S2 Desktop audio endurance** *(was "mobile reality"; downgraded by D1)* | Chrome, Safari, Firefox on desktop: 3-hour run in a background tab, laptop sleep/wake, Bluetooth headphones connect/disconnect mid-session (the output device changes, and `outputLatency` jumps), memory with 6 chunked layers. Plus one 10-minute smoke test on an iPhone, just to record what breaks | Audio survives all of it or recovers with a fade within 2 s. A written note on mobile status, which doesn't block anything |
 | **S3 Safety chain** | Limiter worklet + NaN guard + governor, fed a torture test (feedback delay at 1.2, a bit-crusher making DC, a sudden +30 dB step) | Output never exceeds −1 dBFS; no sustained silence after NaN injection; step increases slewed |
 | **S4 Tarn look test** | Sky + mountains + lake reflection + rain ripples shader, graded | 60 fps at 1440p on a laptop integrated GPU (e.g. Intel Iris Xe / Apple M1 base); 3 people unprompted say it looks "nice/pretty" rather than "like a screensaver" (yes, subjective; that's the point) |
@@ -918,7 +952,7 @@ Decided 2026-09-28:
 |---|---|---|---|
 | D1 | **Primary target** | **Desktop web PWA** | Mobile is best-effort. M0-S2 becomes a desktop endurance test. Performance targets are set for laptop integrated GPUs. There's room for richer visuals (e.g. more fog layers, a higher-quality reflection pass) |
 | D2 | **MVP hero world** | **Tarn** (default taken), with a pivot to Rainy Window if S4 fails | — |
-| D3 | **Sound sourcing** | **Free recordings** (Freesound et al.) | Quality depends on curation; budget listening time. Licences are tagged per asset |
+| D3 | **Sound sourcing** | **Rain: self-recorded** (see §8.1.1). **Everything else: free recordings** (Freesound et al.) | Rain is the hero layer and the biggest loop risk, so owning it is the right place to spend effort. Other layers depend on curation; budget listening time. Licences are tagged per asset |
 | D4 | **Commercial intent** | **Non-commercial** | CC-BY-NC and non-commercial model licences (e.g. Stable Audio Open) become usable. Credits screen is mandatory. Going commercial later means replacing NC assets (the audit script lists them) |
 | D5 | **Sharing scope** | **Link only** (default taken) | No backend in MVP |
 | D6 | **UI framework** | **Svelte 5** (no preference expressed, so the default stands) | — |
@@ -927,10 +961,8 @@ Decided 2026-09-28:
 Still unknown: **weekly hours available.** That's needed only to turn §10's relative sizes into dates.
 
 **Things to watch because of D3 and D4:**
-- **The free-assets decision raises risk #1 (loopy/fake nature).** Most Freesound rain recordings are 1–3 minutes, recorded at different places, so the 3–10 minutes of *consistent* material per bed that §3.2 asks for will be hard to find. Mitigations, in order:
-  1. Stitch several recordings of *similar* character into one bed pool, with loudness and EQ matched in the asset pipeline;
-  2. Lean harder on the procedural layers (drop synth, wind) to hide the joins;
-  3. If S1 still fails, record rain yourself. A phone in a jar by a window is a legitimately decent rain recording.
+- **Free assets raise risk #1 (loopy/fake nature) for the non-rain layers.** Most Freesound recordings are 1–3 minutes, recorded at different places, so 3–10 minutes of *consistent* material per bed will be hard to find for the lake, stream and wind. Mitigations: stitch recordings of *similar* character into one bed pool (loudness and EQ matched in the pipeline), and lean on the procedural layers (drop synth, wind) to hide the joins. The same recording kit used for rain can grab a stream or lake later if a free bed fails the loop test.
+- **Rain timing:** you can't schedule weather. Medium rain is common; light and heavy take patience. **Start recording now, in parallel with M0–M1.** The S1 spike can begin on free placeholder rain and swap in your recordings as they arrive.
 - **NC is a one-way door you've propped open, not locked.** It's fine for now. Just keep the manifest honest, and if the "no" ever turns into a "maybe", run the audit before launch, not after.
 
 ---
