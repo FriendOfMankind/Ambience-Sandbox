@@ -12,9 +12,9 @@
 
 - **What it is:** a web app (installable PWA) that renders one coherent *world*: nature sound, generative music and procedural visuals all driven by one shared **World State**. Press play and it's good immediately. Open Create mode and every layer is yours to break.
 - **What's distinctive:** the world *causes* both the sound and the image. A heron lands, so you hear the splash and see the ripple. Lightning flashes, then thunder follows with a delay set by its distance. Visuals don't *react to* an FFT the way a music visualizer does. This event-driven coupling is the product's signature.
-- **MVP:** one exceptionally polished world, **"Tarn"** (an alpine lake with weather and a day/night cycle), four cross-domain macros (Time, Weather, Energy, Strangeness), Create mode with Simple and Advanced layers, Focus mode, a timer, local saves, seeds, and a share link. No accounts, no AI, no audio export.
+- **MVP (desktop-first, non-commercial, free assets — see §11):** one exceptionally polished world, **"Tarn"** (an alpine lake with weather and a day/night cycle), four cross-domain macros (Time, Weather, Energy, Strangeness), Create mode with Simple and Advanced layers, Focus mode, a timer, local saves, seeds, and a share link. No accounts, no AI, no audio export.
 - **Stack:** TypeScript + Vite, raw Web Audio API with AudioWorklets for safety DSP, our own lookahead scheduler, WebGL2 for visuals (WebGPU later), Svelte 5 for UI, IndexedDB for persistence, a service worker for offline use.
-- **Hardest risks:** (1) nature beds that sound loopy or fake, (2) music that becomes annoying after 90 minutes, (3) procedural visuals that look like a 2009 screensaver, (4) iOS audio and memory behaviour. All four get throwaway spikes in Milestone 0, before any real architecture is built.
+- **Hardest risks:** (1) nature beds that sound loopy or fake, (2) music that becomes annoying after 90 minutes, (3) procedural visuals that look like a 2009 screensaver, (4) long-session robustness on desktop (sleep/wake, device changes). All four get throwaway spikes in Milestone 0, before any real architecture is built.
 
 ---
 
@@ -187,7 +187,7 @@ Tabs: **World · Nature · Music · Visuals · Mix**
 | **Recorded layers** (field recordings) | ★★★★★ | Only with good segmenting/crossfading | Low (gain/filter) | Memory-heavy | Yes | Yes | Must be managed | **Core of nature** |
 | **Synthesis / procedural** | ★★ – ★★★★ (wind and noise great; birds hard) | Yes | ★★★★★ | CPU-light to moderate | Yes | Yes | Clean | **Core of music; helpers for nature** (wind, rain texture, noise) |
 | **Algorithmic composition** (rules driving synths/samples) | n/a | Yes | ★★★★★ | Tiny | Yes, with a seeded PRNG | Yes | Clean | **The music brain** |
-| **AI offline** (pre-generated clips) | ★★★ – ★★★★ | No, it's just more recordings | Low | As recordings | Yes | Yes | **Model licence dependent**, e.g. Stable Audio Open is non-commercial except under a $1M revenue threshold [46] | Maybe, for asset gaps later |
+| **AI offline** (pre-generated clips) | ★★★ – ★★★★ | No, it's just more recordings | Low | As recordings | Yes | Yes | **Model licence dependent**, e.g. Stable Audio Open is non-commercial except under a $1M revenue threshold [46]; fine for this non-commercial project | Allowed for asset gaps; not a primary source |
 | **AI real-time** (Lyria RT / Magenta RT) | ★★★★ music | Yes | Medium (text/style prompts) | Paid API or a big GPU; network latency | **No**, it isn't deterministic from a seed | No | Provider ToS | **Later, as an opt-in "Dream" layer** |
 
 **Recommendation for the MVP:** **a hybrid.**
@@ -531,12 +531,12 @@ flowchart LR
 **Recommendation: a web-first PWA.**
 - Zero-install sharing: a URL *is* a world.
 - Web Audio + WebGL2 are enough for everything in the MVP.
-- One codebase for desktop and mobile; wrap with Capacitor later if App Store presence or better iOS background audio matters.
+- **Desktop is the target (D1).** Mobile browsers should load and play without breaking, but they're best-effort: no mobile acceptance criteria, no mobile-specific UI work in the MVP. Capacitor is a post-MVP option if mobile ever matters.
 
 | Concern | Choice | Why |
 |---|---|---|
 | Language/build | **TypeScript + Vite** | Fast dev loop, worker/worklet bundling |
-| UI | **Svelte 5** (runes) | Fine-grained reactivity suits 100+ live sliders without re-render overhead. **Use React if you already know it well**; the engine is framework-agnostic either way |
+| UI | **Svelte 5** (runes). *Decided (D6)* | Fine-grained reactivity suits 100+ live sliders without re-render overhead; the engine is framework-agnostic either way |
 | Audio | **Raw Web Audio + AudioWorklets** | Full control of the graph, scheduling and safety chain. Tone.js is still maintained (15.x) [47] and could supply synths/FX. My take: its tempo-centric Transport is the wrong clock for free-time ambient, so write our own scheduler and optionally borrow Tone instruments behind our `Voice` interface |
 | Graphics | **WebGL2** via a thin helper (e.g. `twgl.js`) plus our own shader passes | Universal support; WebGPU isn't on Firefox Linux yet [34] |
 | State | a plain TS store + **Immer** patches for undo/redo; **Zod** schemas for the document | Validated, versioned, diffable |
@@ -615,11 +615,11 @@ flowchart LR
 - Convolution reverb shared as a single send, not per voice.
 - Voice pooling: synth voices are reused, not re-created per note.
 
-**Memory plan (a key mobile risk):**
+**Memory plan** (less critical now that desktop is the target, but chunking still keeps multi-hour sessions flat):
 - Decoded PCM is float32. **5 min stereo @48 kHz ≈ 115 MB decoded**, so full beds cannot be decoded up front.
 - Beds ship as 15–40 s chunks. The BedPlayer keeps only *current + next* decoded per active layer, with an LRU pool budget:
   - desktop about 150 MB;
-  - mobile about 60–80 MB.
+  - mobile (best-effort) about 60–80 MB.
 - Point-source one-shots are **mono**. Decoded one-shot pools are capped per pool.
 - Budget-driven fallback: on low-memory devices, fewer simultaneous bed layers, and those beyond the cap are procedurally approximated.
 - Encoding: **AAC (.m4a)** as the universal format. Our crossfading design doesn't need gapless loops, which sidesteps AAC's encoder-padding problem. Opus/WebM as the primary on non-Safari browsers if the M0 spike shows a size win worth the complexity. *Safari Opus support details: verify.*
@@ -724,10 +724,11 @@ flowchart LR
    - Record long takes (10–30 min) at 48 kHz/24-bit or 32f.
    - The hard parts are *location noise* (planes, roads) and *wind handling*; plan for 5× more recording time than you'll use.
    - You own the rights outright, and the result is distinctive.
-2. **Freesound, CC0 only for shipped packs.** CC0 requires no attribution. CC-BY sounds **require** attribution (title, author, URL, licence) wherever used [48].
-   - Recommendation: use CC0 for anything bundled.
-   - Allow CC-BY only with an automated credits screen generated from the asset manifest.
-   - **Never use NC (non-commercial)** licences if there's any chance of monetising.
+2. **Freesound: the chosen source (decision D3).** CC0 requires no attribution. CC-BY sounds **require** attribution (title, author, URL, licence) wherever used [48].
+   - Because the project is non-commercial (D4), **CC0, CC-BY and CC-BY-NC are all allowed.** Prefer CC0 when quality is equal, since it adds no obligations.
+   - Every non-CC0 asset appears on an automated credits screen generated from the asset manifest. This is a hard requirement, not a nice-to-have.
+   - **Tag every asset's licence in the manifest.** If you ever change your mind about going commercial, `tools/assets/audit.ts --commercial` lists every NC asset that has to be replaced. Changing that decision later costs asset work, not a rewrite.
+   - Quality reality check: free recordings vary wildly. Budget time for *curation* (listening to 50 rain recordings to find 3 good ones), not just downloading.
 3. **Commercial SFX libraries.** High quality. **Read the EULA's "software/app/interactive" clause:** many allow use in products but forbid distributing sounds in an extractable form. A web app's audio files are trivially downloadable from the network tab, so get written confirmation or pick libraries that explicitly permit interactive/app use.
 4. **Commission a recordist.** Buy full rights ("work for hire" / exclusive licence), which is often cheaper than expected for a few hours of material.
 
@@ -755,7 +756,7 @@ flowchart LR
 | **Share link** (recipe only) | No audio leaves the app; the recipient's app renders it from its own licensed assets | ✅ Safe |
 | **Audio export** (WAV/MP3 of a session) | Distributes derived audio. CC-BY → attribution must travel with the file; commercial EULAs may forbid "standalone" redistribution; CC0/own/synth are fine | ❌ Not in MVP. Later: export includes an embedded credits manifest; disable export for worlds containing restricted assets |
 | **User uploads their own sounds** | We host third-party content → DMCA/moderation obligations | ❌ Later, local-only first (never uploaded) |
-| **AI-generated assets** | Model licence dependent (e.g. Stable Audio Open: non-commercial community licence with a < $1M revenue exception [46]); provider ToS vary | Avoid in MVP; document the provenance of any used |
+| **AI-generated assets** | Model licence dependent (e.g. Stable Audio Open: non-commercial community licence with a < $1M revenue exception [46]); provider ToS vary | Permitted under the non-commercial decision to fill specific gaps (e.g. a missing insect texture), tagged `source: ai/<model>` in the manifest. Recordings still come first, because generated ambience tends to sound smeared |
 | **AI real-time layer** | Provider ToS on output ownership; per-minute cost | Later, opt-in |
 
 ---
@@ -790,7 +791,7 @@ flowchart LR
 - Reduced motion + freeze visuals.
 - Contrast-checked UI; captions for world events (optional "what's happening" text, e.g. "a heron lands").
 
-**Platform:** PWA offline for Tarn; desktop Chrome/Safari/Firefox; mobile Safari and Chrome functional. Mobile can be "good", not perfect.
+**Platform:** PWA offline for Tarn; desktop Chrome, Safari and Firefox are the acceptance targets. Mobile is best-effort: it must not crash or blast audio, and nothing more is promised.
 
 ### Later (explicitly out of MVP)
 
@@ -826,9 +827,9 @@ flowchart LR
 | Spike | What | Acceptance |
 |---|---|---|
 | **S1 Loop-free rain bed** | BedPlayer prototype on a real rain recording (CC0 or your own), with segment + shuffle + crossfade | Blind test: 3+ listeners, 20 min each, fewer than 1 "repeat!" press per 10 min. No clicks at crossfades |
-| **S2 Mobile audio reality** | iPhone (iOS latest and one older) + a mid-range Android: unlock, silent switch, lock screen, a 60-min run, a phone-call interruption, memory with 6 chunked layers | A written matrix of what works. Decide if the lock-screen gap is acceptable for the MVP |
+| **S2 Desktop audio endurance** *(was "mobile reality"; downgraded by D1)* | Chrome, Safari, Firefox on desktop: 3-hour run in a background tab, laptop sleep/wake, Bluetooth headphones connect/disconnect mid-session (the output device changes, and `outputLatency` jumps), memory with 6 chunked layers. Plus one 10-minute smoke test on an iPhone, just to record what breaks | Audio survives all of it or recovers with a fade within 2 s. A written note on mobile status, which doesn't block anything |
 | **S3 Safety chain** | Limiter worklet + NaN guard + governor, fed a torture test (feedback delay at 1.2, a bit-crusher making DC, a sudden +30 dB step) | Output never exceeds −1 dBFS; no sustained silence after NaN injection; step increases slewed |
-| **S4 Tarn look test** | Sky + mountains + lake reflection + rain ripples shader, graded | 30 fps on a mid phone at DPR 1.5; 3 people unprompted say it looks "nice/pretty" rather than "like a screensaver" (yes, subjective; that's the point) |
+| **S4 Tarn look test** | Sky + mountains + lake reflection + rain ripples shader, graded | 60 fps at 1440p on a laptop integrated GPU (e.g. Intel Iris Xe / Apple M1 base); 3 people unprompted say it looks "nice/pretty" rather than "like a screensaver" (yes, subjective; that's the point) |
 | **S5 90-minute music test** | Quick Pad + Keys + Texture generator with breaths | Listen while working for 90 min. Log every moment it annoyed or grabbed attention. Fewer than 3 annoyance events |
 
 **Kill criteria:** if S1 fails after two iterations, invest in more source material before building further. If S4 fails, pivot the MVP world to Rainy Window (the rain-on-glass shader is a safer beauty bet).
@@ -858,7 +859,7 @@ See the **M1 handoff spec** in §12.
 
 - Tarn layers 1–8, post chain, budget governor, reduced motion, event-driven effects (ripples, lightning, heron).
 - **Acceptance:**
-  - 60 fps desktop / 30 fps mobile target met.
+  - 60 fps on an integrated laptop GPU at native resolution (dynamic resolution allowed down to 0.75×).
   - Lightning passes the flash-rate limit.
   - Screenshot tests of fixed-seed frames are stable within the same browser.
 
@@ -902,25 +903,35 @@ See the **M1 handoff spec** in §12.
 | 1 | **Nature sounds loopy or fake** | Ears are extremely good at detecting repetition | S1 blind test; budget for more source material |
 | 2 | **Music fatigue over long sessions** | Generative music tends toward either monotony or noodling | S5; breaths; Focus narrowing; real-session testing in M8 |
 | 3 | **Procedural visuals look cheap** | "Programmer art" is the default outcome of shaders | S4 with an art-direction pass *first*: make a mood board and 3 target frames before writing shaders |
-| 4 | **iOS audio/memory** | Platform behaviour isn't fully documented; it's reported via bug trackers | S2 on real devices, week 1 |
+| 4 | **Long-session desktop robustness** (was iOS; downgraded by D1) | Sleep/wake, device changes and 3-hour sessions are where Web Audio apps quietly fall apart | S2 endurance run, week 1 |
 | 5 | **Sandbox makes ugly states that users blame the app for** | Freedom vs coherence | Mutate amounts + locks + "back to preset" + A/B; test whether users recover |
 | 6 | **Loudness surprises in Advanced** | Feedback, resonance, ring-mod | S3 torture test; the governor is always on |
 | 7 | **Scope creep** (your brief is big) | Everything in it sounds essential | This MVP list. Anything new goes to "Later" unless it replaces something |
 
 ---
 
-## 11. Open decisions (I need your input)
+## 11. Decisions
 
-| # | Decision | Options & trade-offs | My default |
+Decided 2026-09-28:
+
+| # | Decision | Choice | Consequences |
 |---|---|---|---|
-| 1 | **Primary target** | *Desktop web* (easiest, best for long study sessions) · *Mobile-first* (bigger audience; iOS background audio and memory pain) · *Native* (best mobile audio, slowest to build, no link-sharing magic) | **Desktop-first PWA**, mobile "works well", native wrapper later if needed |
-| 2 | **MVP hero world** | *Tarn* (showcases everything; visually harder) · *Rainy Window* (safer beauty, narrower showcase, rain is what every competitor does) | **Tarn**, with a pivot to Rainy Window if S4 fails |
-| 3 | **Sound sourcing** | *Record your own* (best + unique; time and travel) · *CC0 Freesound* (free; quality varies; others use the same files) · *Paid library* (fast, high quality; EULA constraints for web delivery) | **CC0 for M0–M2 placeholders, then your own recordings for hero layers** (lake, stream, rain) |
-| 4 | **Commercial intent** | Affects: NC licences (banned if yes), AI model licences, whether to plan accounts/payments | **Assume "maybe commercial"**: no NC assets, clean provenance from day one |
-| 5 | **Sharing scope** | *Link only* (no backend) · *Gallery/accounts* (community, moderation, cost) | **Link only** for MVP |
-| 6 | **UI framework** | Svelte (lean, reactive) vs React (bigger ecosystem, maybe your familiarity) | **Svelte 5**, *unless you already know React*, then React. Honestly a minor call |
+| D1 | **Primary target** | **Desktop web PWA** | Mobile is best-effort. M0-S2 becomes a desktop endurance test. Performance targets are set for laptop integrated GPUs. There's room for richer visuals (e.g. more fog layers, a higher-quality reflection pass) |
+| D2 | **MVP hero world** | **Tarn** (default taken), with a pivot to Rainy Window if S4 fails | — |
+| D3 | **Sound sourcing** | **Free recordings** (Freesound et al.) | Quality depends on curation; budget listening time. Licences are tagged per asset |
+| D4 | **Commercial intent** | **Non-commercial** | CC-BY-NC and non-commercial model licences (e.g. Stable Audio Open) become usable. Credits screen is mandatory. Going commercial later means replacing NC assets (the audit script lists them) |
+| D5 | **Sharing scope** | **Link only** (default taken) | No backend in MVP |
+| D6 | **UI framework** | **Svelte 5** (no preference expressed, so the default stands) | — |
+| D7 | **Developer profile** | Very comfortable with TS/audio/graphics | The next chat should scaffold and build, not explain. Milestone sizes in §10 assume an experienced dev |
 
-Also useful to know, though not decisions: **your experience with TypeScript, audio DSP and shaders, and how many hours per week you have.** That changes the milestone sizing and how much the next chat should scaffold vs explain.
+Still unknown: **weekly hours available.** That's needed only to turn §10's relative sizes into dates.
+
+**Things to watch because of D3 and D4:**
+- **The free-assets decision raises risk #1 (loopy/fake nature).** Most Freesound rain recordings are 1–3 minutes, recorded at different places, so the 3–10 minutes of *consistent* material per bed that §3.2 asks for will be hard to find. Mitigations, in order:
+  1. Stitch several recordings of *similar* character into one bed pool, with loudness and EQ matched in the asset pipeline;
+  2. Lean harder on the procedural layers (drop synth, wind) to hide the joins;
+  3. If S1 still fails, record rain yourself. A phone in a jar by a window is a legitimately decent rain recording.
+- **NC is a one-way door you've propped open, not locked.** It's fine for now. Just keep the manifest honest, and if the "no" ever turns into a "maybe", run the audit before launch, not after.
 
 ---
 
@@ -929,7 +940,7 @@ Also useful to know, though not decisions: **your experience with TypeScript, au
 **Goal:** a running skeleton that proves the architecture end to end. Play → one nature bed + one event pool + one pad voice through the full safety chain, all driven by a WorldDocument with a seed. No visuals beyond a debug overlay (a placeholder gradient canvas driven by DerivedState).
 
 **Tasks, in order:**
-1. **Scaffold:** Vite + TS + Svelte 5, ESLint/Prettier, Vitest, Playwright. Folder structure as in §7.2. Worklets bundled via `new URL('./x.worklet.ts', import.meta.url)`.
+1. **Scaffold:** Vite + TS + Svelte 5 (decided), ESLint/Prettier, Vitest, Playwright. Folder structure as in §7.2. Worklets bundled via `new URL('./x.worklet.ts', import.meta.url)`.
 2. **`core/rng.ts`:** sfc32 PRNG + string hash (cyrb128), `createRng(seed, streamName)`, helpers (`float`, `range`, `pick`, `weighted`, `gaussian`, `poissonNext(lambda)`), `ShuffleBag<T>`.
    - Tests: determinism, stream independence, distribution sanity.
 3. **`world/schema.ts`:** Zod schema for the subset needed: seed, macros (weather only for now), `nature.layers.{rain, birds}`, `music.voices.pad`, `mix`. Default doc for `tarn-m1`. Round-trip tests.
