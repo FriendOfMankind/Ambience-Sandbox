@@ -2,6 +2,32 @@
 
 Where things stand, so the next session can pick up without re-reading the whole chat.
 
+## Start here: next session is the visuals
+
+Decision (user, end of session 1): **audio tuning is parked; work on the visuals next.** The direction is already decided (PLAN §11, D10): a trippy, synaesthetic **3D object** that changes shape and colour with the sounds, with **floating dials** around it that open each layer's controls. What is *not* decided is the visual grammar. Ask the user before designing; they want to be asked, not guessed at. Questions worth putting to them first: what the object is and how abstract it should be, one or two reference looks, how calm vs. trippy it gets, and whether the dials replace the current layer strips or sit alongside them.
+
+**What exists**
+- `spikes/sandbox/view.ts`: a 2D canvas placeholder. Pitch class → hue (`pitchHue`, same note = same colour in any octave), ripples for drops, glowing tubes for chime strikes, orbs for music notes, the sky hue shifting on chord changes. It is the seed of the mapping, not the design.
+- The engine already reports what a visual needs, per sound, not from a mixed FFT (PLAN §5.3):
+  - `WorldEvents.rain[]`: `{frame, pan, diameterMm, surface, bubbleHz}` (near drops only, at most 200 per tick)
+  - `WorldEvents.chimes[]`: `{frame, tube, velocity}`
+  - `WorldEvents.music[]`: `{kind: 'note' | 'chord', frame, hz, velocity, step}`
+  - `WorldFeatures`: per-layer smoothed `level`, `windSpeed`, `gust`, `chordStep`
+  - Ticks arrive about every 16 ms from the worklet with `frame` and `time`, so an event's audio-clock time is `msg.time + (event.frame − msg.frame) / sampleRate`. `SceneView.push(events, features, timeOf)` and `main.ts` show the wiring; `ctx.getOutputTimestamp()` gives the audio clock to draw against.
+- The Lab (`spikes/lab/`) has no visual. Adding the new visual there too, so each test shows what that one sound looks like, is an option.
+
+**Design work still owed (from D10):** per-layer visual grammar (rain, wind, chimes, music each need their own language), Focus-mode calming, reduced motion, **flash safety** (no more than 3 flashes a second, no large-area strobing), and keyboard and screen-reader access for the dials. Prototype in Three.js/WebGL driven by the events and features above. The artifact build (`scripts/build-artifact.mjs`) bundles a page's `main.ts` into one inline script, so an npm dependency such as `three` gets bundled in (expect a few hundred KB).
+
+**Constraints and lessons**
+- The audio thread must never be starved. Keep visuals off it, and keep the frame budget honest (60 fps desktop). Lesson from this session: `AudioWorkletNode.disconnect()` does *not* stop a processor; post `{type: 'stop'}` (handled in `world.worklet.ts`) before dropping a node, or it keeps rendering.
+- Claude cannot hear audio. Anything audio-related is verified by measurement only (offline renders, spectra) and needs the user's ears. Visuals can be checked by screenshot.
+- Testing in a real browser: Playwright is installed and Chromium is at `/opt/pw-browsers/chromium`. `AudioWorklet` needs a secure context, so serve the built page with `page.route('http://localhost:4173/…')` rather than `setContent`. Build pages with `npm run build:artifact` (sandbox) or `npm run build:lab`.
+- Artifact rules: inline everything, only cdnjs/jsdelivr scripts, no downloads (inert), `localStorage` for per-viewer state only.
+- Published: Tarn Lab at https://claude.ai/artifact/9R9E3oy5W6uiaPzY38eThq (version 2 has the leak fix). The sandbox artifact was published in an earlier chat; its URL isn't recorded here, and it needs republishing to get the same fix.
+- Branch: `claude/sleepy-ptolemy-04oiyd`.
+
+**Parked, not forgotten:** audio tuning from the Lab feedback (see "Lab feedback, round 1" below). The user said "we can dial in the sounds later".
+
 ## Built
 
 - **Tarn Sandbox** (`spikes/sandbox/`, published as a private claude.ai Artifact): four live-synthesised layers in one world.
@@ -48,8 +74,8 @@ Objective levels measured while building it (20 s renders, RMS / peak before the
 
 ## Suggested next steps
 
-1. Get listening feedback through the Lab on the new tin, glass and leaves, and on wind, chimes and music, then tune.
-2. Design pass for the 3D synaesthetic object and floating dials: per-layer visual grammar, Focus-mode calming, reduced motion, flash safety, and keyboard/screen-reader access for the dials. Prototype in Three.js/WebGL, driven by `WorldSynth` events and features.
+1. **Visuals** (this is next; see "Start here" at the top). Get the user's direction first, then prototype the 3D object and per-layer mappings.
+2. Audio tuning, parked. Re-rate the "static" tests in the Lab with the leak fix, then act on the round-1 findings: level-match gale / whistle / downpour / wood and bright chimes, fix the surface-blind rain wash (open question to the user: should grass be a real hush, or as distinct as tin?), lower the bubble pitch/squeak, make the leaf flutters less regular. Rate the music keys / both / Lydian and the 8 scenes, which have not been heard.
 3. Scene morphing (parameter interpolation) and loudness-matched scenes.
 4. Save/share: URL-encoded world + seed (PLAN §7.8).
 
