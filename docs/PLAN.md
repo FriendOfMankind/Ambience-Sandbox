@@ -922,6 +922,17 @@ flowchart LR
 
 **Kill criteria:** if S1 fails after two iterations, invest in more source material before building further. If S4 fails, pivot the MVP world to Rainy Window (the rain-on-glass shader is a safer beauty bet).
 
+**M0 status (2026-09-28):** S1 is built and runnable (`/spikes/rain-bakeoff/`, see README). What exists:
+- `RainSynth` (all three tiers, six surfaces, and the sandbox controls: rain in key, grid, stretch, size bias).
+- `ResonatorBank`, so metal and glass cost the same however hard it rains.
+- `BedPlayer` for recordings.
+- Lookahead limiter + NaN guard, and BS.1770 loudness matching.
+- A blind A/B/C harness that applies the decision rule.
+
+Measured: normal rain uses 2–6% of one core in Node; a 500 mm/h "wall of water" uses about 27%. Bed crossfade seams hold within about ±1 dB. **Still needed: your recordings and the listening test itself.** Code can't decide realism.
+
+Implementation note that updates §3.4: dense rain can't go through the main-thread scheduler (thousands of drops per second). So the rain worklet generates its own drops from its seeded stream and posts near-drop events back with sample-frame timestamps. The main thread maps those to the audio clock for visuals. The pattern generalises: any high-density layer owns its scheduling inside its worklet and reports events.
+
 ### M1: Engine skeleton (M). *The next chat starts here*
 
 See the **M1 handoff spec** in §12.

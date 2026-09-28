@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# Raw recordings stay out of git (large, and not all are for redistribution)
+assets-raw/
+*.local
+.DS_Store
