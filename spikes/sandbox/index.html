@@ -10,18 +10,18 @@
   <body>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=Instrument+Sans:wght@400;500;600&amp;display=swap" />
-    <canvas id="scene" aria-label="A glowing object above a dark lake, surrounded by contour-line hills. The object's shape and colour follow the music; chime strikes ring patterns across it; raindrops ripple the lake; the wind moves the haze and bends the lines."></canvas>
+    <canvas id="scene" aria-label="A glowing object above a dark lake, surrounded by contour-line hills. The object follows the music: chords reshape and recolour it, notes light points on it, bowls ring patterns across it, the beat makes it throb. The background follows the ambience: raindrops ripple the lake, chimes glow around the shore, the wind moves the haze and bends the hills."></canvas>
 
     <header id="top" class="top">
       <div class="brand">
         <h1>Tarn</h1>
-        <p class="sub">Every sound is generated live. The object is the music; the lake is the rain; the air is the wind.</p>
+        <p class="sub">Generative music with natural ambience underneath. The object is the music; the lake, air and hills are the weather.</p>
       </div>
       <div class="transport">
         <button id="play" class="primary">▶ Play</button>
         <label class="inline">Volume <input id="volume" type="range" min="-40" max="0" step="0.5" value="-10" /> <output id="volume-out">−10.0 dB</output></label>
-        <label class="inline">Scene <select id="scene-pick"></select></label>
-        <label class="inline">Key <select id="scale"></select></label>
+        <label class="inline">Vibe <select id="scene-pick"></select></label>
+        <span class="inline keysel">Key <select id="root" aria-label="Root note"></select> <select id="family" aria-label="Scale family"></select></span>
         <span class="seed">Seed <code id="seed"></code> <button id="reseed" title="A different version of the same world">New seed</button></span>
       </div>
       <div class="look">
@@ -39,8 +39,11 @@
         <h2>Advanced</h2>
         <button id="adv-close">Close</button>
       </div>
-      <p class="adv-note">Every control for every layer. The dials around the object are the same controls.</p>
-      <div id="strips" class="strips"></div>
+      <p class="adv-note">Every control. The dials around the object are the same controls.</p>
+      <h2 class="sect">Music</h2>
+      <div id="music-strips" class="strips"></div>
+      <h2 class="sect">Ambience</h2>
+      <div id="ambience-strips" class="strips"></div>
       <section class="space-card">
         <h2 class="label">Space</h2>
         <div id="space" class="ctls"></div>

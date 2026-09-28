@@ -20,6 +20,7 @@ import { DEFAULT_WIND_PARAMS, WindSynth, type WindParams } from '../nature/wind/
 import { DEFAULT_MUSIC_PARAMS, MusicSynth, type MusicEvent, type MusicParams } from '../music/MusicSynth';
 import type { ScaleSnap } from '../music/scales';
 import { DEFAULT_REVERB_PARAMS, Reverb, type ReverbParams } from '../dsp/Reverb';
+import { Biquad } from '../music/voices';
 
 export const LAYERS = ['rain', 'wind', 'chimes', 'music'] as const;
 export type LayerId = (typeof LAYERS)[number];
@@ -32,8 +33,17 @@ export interface LayerMix {
   send: number;
 }
 
+/** How music and ambience share the mix. */
+export interface BusParams {
+  /** 0 = ambience only … 0.5 = both at full … 1 = music only. */
+  blend: number;
+  /** 0..1: how far the ambience steps aside (a mid-range dip and slight duck) while music plays. */
+  support: number;
+}
+
 export interface WorldParams {
   mix: Record<LayerId, LayerMix>;
+  bus: BusParams;
   scale: ScaleSnap;
   rain: Partial<RainParams>;
   wind: Partial<WindParams>;
@@ -44,6 +54,7 @@ export interface WorldParams {
 
 export interface WorldParamsPatch {
   mix?: Partial<Record<LayerId, Partial<LayerMix>>>;
+  bus?: Partial<BusParams>;
   scale?: ScaleSnap;
   rain?: Partial<RainParams>;
   wind?: Partial<WindParams>;
@@ -74,6 +85,7 @@ export const DEFAULT_WORLD_PARAMS: WorldParams = {
     chimes: { on: true, level: 0.9, send: 0.35 },
     music: { on: true, level: 0.6, send: 0.45 },
   },
+  bus: { blend: 0.5, support: 0.6 },
   scale: DEFAULT_MUSIC_PARAMS.scale,
   rain: {},
   wind: {},
@@ -95,6 +107,11 @@ export class WorldSynth {
   private readonly gainCur: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
   private readonly levelCur: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
   private chordStep = 0;
+  private musicTrim = 1;
+  private ambTrim = 1;
+  private presence = 0;
+  private readonly carveL = new Biquad();
+  private readonly carveR = new Biquad();
   private events: WorldEvents = { rain: [], chimes: [], music: [] };
 
   private readonly buf = {
@@ -203,6 +220,20 @@ export class WorldSynth {
     const sq = { rain: 0, wind: 0, chimes: 0, music: 0 };
     let gR = this.gainCur.rain, gW = this.gainCur.wind, gC = this.gainCur.chimes, gM = this.gainCur.music;
 
+    // Blend and support: music and ambience trims, and a presence-driven dip in the ambience.
+    const blend = Math.max(0, Math.min(1, this.p.bus.blend));
+    const kb = 1 - Math.exp(-frames / (0.2 * fs));
+    this.musicTrim += ((blend < 0.5 ? blend * 2 : 1) - this.musicTrim) * kb;
+    this.ambTrim += ((blend > 0.5 ? (1 - blend) * 2 : 1) - this.ambTrim) * kb;
+    const musicDb = 20 * Math.log10(this.levelCur.music + 1e-9);
+    const target = Math.max(0, Math.min(1, (musicDb + 50) / 30)) * this.musicTrim;
+    this.presence += (target - this.presence) * (1 - Math.exp(-frames / (0.8 * fs)));
+    const support = Math.max(0, Math.min(1, this.p.bus.support)) * this.presence;
+    this.carveL.peaking(fs, 900, 0.7, -6 * support);
+    this.carveR.peaking(fs, 900, 0.7, -6 * support);
+    const duck = Math.pow(10, (-2.5 * support) / 20) * this.ambTrim;
+    const mt = this.musicTrim;
+
     for (let n = 0; n < frames; n++) {
       gR += (t.rain - gR) * smooth;
       gW += (t.wind - gW) * smooth;
@@ -211,11 +242,11 @@ export class WorldSynth {
       const rl = b.rainL[n] * gR, rr = b.rainR[n] * gR;
       const wl = b.windL[n] * gW, wr = b.windR[n] * gW;
       const cl = b.chimeL[n] * gC, cr = b.chimeR[n] * gC;
-      const ml = b.musicL[n] * gM, mr = b.musicR[n] * gM;
-      outL[n] = rl + wl + cl + ml;
-      outR[n] = rr + wr + cr + mr;
-      b.sendL[n] = rl * sRain + wl * sWind + cl * sChime + b.mSendL[n] * gM * sMusic;
-      b.sendR[n] = rr * sRain + wr * sWind + cr * sChime + b.mSendR[n] * gM * sMusic;
+      const ml = b.musicL[n] * gM * mt, mr = b.musicR[n] * gM * mt;
+      outL[n] = this.carveL.run(rl + wl + cl) * duck + ml;
+      outR[n] = this.carveR.run(rr + wr + cr) * duck + mr;
+      b.sendL[n] = (rl * sRain + wl * sWind + cl * sChime) * this.ambTrim + b.mSendL[n] * gM * mt * sMusic;
+      b.sendR[n] = (rr * sRain + wr * sWind + cr * sChime) * this.ambTrim + b.mSendR[n] * gM * mt * sMusic;
       sq.rain += rl * rl + rr * rr;
       sq.wind += wl * wl + wr * wr;
       sq.chimes += cl * cl + cr * cr;
@@ -261,6 +292,7 @@ export function mergeWorld(base: WorldParams, patch: WorldParamsPatch): WorldPar
   for (const id of LAYERS) mix[id] = { ...base.mix[id], ...(patch.mix?.[id] ?? {}) };
   return {
     mix,
+    bus: { ...base.bus, ...(patch.bus ?? {}) },
     scale: patch.scale ?? base.scale,
     rain: { ...base.rain, ...(patch.rain ?? {}) },
     wind: { ...base.wind, ...(patch.wind ?? {}) },

@@ -2,7 +2,11 @@
 
 Where things stand, so the next session can pick up without re-reading the whole chat.
 
-## Start here: visuals prototype v1 is built; get the user's reaction
+## Start here: music engine v2 + music/ambience split is built; get the user's ears on it
+
+Session 2, part 2: the user asked for Music and Ambience as two sections, much more musical control, and more instruments and techniques. They chose: chimes move to Ambience; lo-fi beats as an option but mostly soft; 432 Hz and binaural as optional extras; build the core first, then a listening round. **Read docs/MUSIC.md.** Nothing new has been heard yet. Tune by ear next (voice balance, bowl partials, choir formants, beat feel), then the planned extras (granular shimmer, handpan, instruments from the idea list).
+
+## Earlier in session 2: visuals prototype v1
 
 Session 2 (2026-09-28) built the synaesthetic 3D view. The design, grammar, safety measures and known limits are in **docs/VISUALS.md**; read that first.
 

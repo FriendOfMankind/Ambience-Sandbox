@@ -1,6 +1,6 @@
 # Tarn visuals: design and prototype
 
-Status: first prototype, built 2026-09-28 (PLAN D10). The per-layer grammar below was agreed with the user before building. Answers they gave: the dials replace the layer strips, the kaleidoscope appears only at high Trip, and Trip defaults to 60.
+Status: first prototype, built 2026-09-28 (PLAN D10). Revised the same day for the music/ambience split (docs/MUSIC.md): music drives the object, ambience drives the background. The per-layer grammar below was agreed with the user before building. Answers they gave: the dials replace the layer strips, the kaleidoscope appears only at high Trip, and Trip defaults to 60.
 
 ## Rule
 
@@ -11,7 +11,8 @@ Every bright or fast thing on screen is caused by a sound event. Slow ambient dr
 | Layer | Owns | Event → visual | Feature → visual |
 |---|---|---|---|
 | Music | The object | Chord: new shape family (a harmonic "pose" per scale step) morphing over 3–8 s; the palette re-centres on the root's pitch hue; the attractor core drifts between Aizawa and Thomas dynamics. Note: a node lights up on the skin (longitude = pitch class, latitude = octave) and a ring travels out from it; the core speeds up briefly | Level: breathing and line brightness |
-| Chimes | Rods around the object and the object's skin | Strike: the rod glows in its pitch hue and that tube's cymatic (Chladni-style) nodal pattern rings across the skin, decaying with the tube's ring time | Wind: the rods sway and lean |
+| Music: bowls and beat | The object's skin | Bowl strike: a cymatic (Chladni-style) nodal pattern for its pitch class rings across the skin, decaying with the bowl. Kick: the object swells slightly with a slow release | |
+| Chimes (ambience) | Rods along the far shore | Strike: the rod glows in its pitch hue | Wind: the rods sway and lean |
 | Rain | The lake and the air | Near drop: a ripple on the lake (x = pan, size = diameter). Surface sets the character: water gives double rings, leaves/grass soft splats, stone/tin/glass sharp fast ticks, "Bells" rings in the bubble's pitch hue | Rain rate: streak density and a wetter, glossier landscape |
 | Wind | The air | (none: wind is continuous) | Speed: curl-noise haze, aurora in the sky, how fast the trails swirl. Gust: bends the object downwind and domain-warps the contour hills |
 

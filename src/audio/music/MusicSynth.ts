@@ -1,73 +1,125 @@
 /**
- * MusicSynth: a small generative ambient ensemble.
+ * MusicSynth: a generative ambient ensemble.
  *
- * - Pad:  three voices of detuned saws through a slowly breathing low-pass filter, gliding
- *         between chords built from the world's scale every 20–60 s.
- * - Keys: sparse FM bell/e-piano notes wandering the scale (a weighted random walk that
- *         prefers small steps), through a ping-pong delay.
- * - Breath: a slow random process that thins everything out now and then, so the music
- *         leaves space instead of noodling forever.
+ * Voices: pad (detuned saws, breathing filter), keys (2-op FM), and from ./voices: a
+ * just-tuned harmonic drone, singing bowls, Karplus–Strong plucks, a formant choir and a soft
+ * lo-fi beat, plus an octave shimmer on the reverb send.
+ *
+ * Composition:
+ *  - Chords move through the scale every `chordSeconds` (pad, choir and bowls follow them).
+ *  - Melodic voices each have a role: keys wander (a random walk preferring small steps),
+ *    plucks arpeggiate the chord, bowls sound the chord's root and fifth, sparsely.
+ *  - Rhythm: "free" (random timing), "loops" (Eno-style: each voice owns a few loops of
+ *    incommensurate lengths holding one or two chord-relative notes, so the music never
+ *    repeats the same way), or "pulse" (notes land on a swung eighth grid shared with the beat).
+ *  - Breath: in free/pulse modes, phrases alternate with rests; `breath` sets how long the
+ *    silences are (Eno's rule of thumb: silence at least twice as long as the sound ≈ 0.7).
  *
  * Deterministic for a seed and parameter timeline. Constants are initial guesses.
  */
 
 import { createRng, type Rng } from '../../core/rng';
 import { scaleStepHz, type ScaleSnap } from './scales';
+import { Beat, Bowls, Choir, Drone, Plucks, Shimmer, saw } from './voices';
+
+export type Rhythm = 'free' | 'loops' | 'pulse';
+export type MusicVoice = 'keys' | 'pluck' | 'bowl';
 
 export interface MusicParams {
   padLevel: number;
   keysLevel: number;
-  /** Keys notes per minute at full breath (0..40). */
+  droneLevel: number;
+  bowlsLevel: number;
+  plucksLevel: number;
+  choirLevel: number;
+  beatLevel: number;
+  /** Melodic notes per minute ("Motion"), 0..40. */
   density: number;
-  /** Pad filter brightness 0..1. */
+  /** Overall brightness 0..1 (the inverse of "Warmth"). */
   brightness: number;
   /** Average seconds between chord changes. */
   chordSeconds: number;
-  /** Detune between pad oscillators in cents (0 = pure, 40+ = seasick). */
+  /** Detune between pad/choir oscillators in cents (0 = pure, 40+ = seasick). */
   detune: number;
   /** FM ratio for the keys: 2 = e-piano-ish, 3.5 = bell, odd values = clangy. */
   keysRatio: number;
   /** Keys register: octaves above the scale root for the middle of the range. */
   keysOctave: number;
+  /** 0..1: how long the silences between phrases are. */
+  breath: number;
+  rhythm: Rhythm;
+  /** BPM for the pulse grid and the beat. */
+  tempo: number;
+  /** Where the off-beat eighth lands: 0.5 straight, 0.66 triplet swing. */
+  swing: number;
+  /** 0 off, up to 0.35 a soft heartbeat pulse, above that a gentle lo-fi kit. */
+  beat: number;
+  /** Ring time of bowls and plucks (×). */
+  ring: number;
+  /** Octave shimmer on the reverb send, 0..1. */
+  shimmer: number;
+  /** Optional binaural beat level, 0..1 (headphones only). */
+  binaural: number;
+  /** Binaural beat frequency in Hz. */
+  binauralHz: number;
   scale: ScaleSnap;
 }
 
 export interface MusicEvent {
-  kind: 'note' | 'chord';
+  kind: 'note' | 'chord' | 'beat';
+  /** Which instrument played a note. */
+  voice?: MusicVoice;
   frame: number;
-  /** Note frequency, or the chord root for chord changes. */
+  /** Note frequency, the chord root for chord changes, 0 for beats. */
   hz: number;
   velocity: number;
-  /** Scale step of the note or chord root. */
+  /** Scale step of the note or chord root; for beats, the drum (0 kick, 1 snare). */
   step: number;
 }
 
 export const DEFAULT_MUSIC_PARAMS: MusicParams = {
   padLevel: 1,
   keysLevel: 1,
+  droneLevel: 0.8,
+  bowlsLevel: 0.7,
+  plucksLevel: 0.6,
+  choirLevel: 0.4,
+  beatLevel: 1,
   density: 8,
   brightness: 0.4,
   chordSeconds: 35,
   detune: 9,
   keysRatio: 2,
   keysOctave: 2,
+  breath: 0.5,
+  rhythm: 'free',
+  tempo: 66,
+  swing: 0.58,
+  beat: 0,
+  ring: 1,
+  shimmer: 0.3,
+  binaural: 0,
+  binauralHz: 6,
   scale: { enabled: true, rootHz: 146.83, cents: [0, 300, 500, 700, 1000], periodCents: 1200 },
 };
 
 const PAD_VOICES = 3;
 const KEYS_VOICES = 10;
+const BLOCK_MAX = 1024;
 
-/** PolyBLEP-corrected sawtooth, phase in [0,1). */
-function saw(phase: number, inc: number): number {
-  let v = 2 * phase - 1;
-  if (phase < inc) {
-    const t = phase / inc;
-    v -= t + t - t * t - 1;
-  } else if (phase > 1 - inc) {
-    const t = (phase - 1) / inc;
-    v -= t * t + t + t + 1;
-  }
-  return v;
+interface Loop { base: number; pos: number; notes: { at: number; deg: number; vel: number }[] }
+interface Player {
+  voice: MusicVoice;
+  /** Share of the melodic note rate. */
+  rate: number;
+  gated: boolean;
+  nextIn: number;
+  loops: Loop[];
+  /** Base loop lengths in seconds (incommensurate on purpose). */
+  loopSeconds: number[];
+  /** Chord-relative scale degrees loops may hold (octave offsets added by register). */
+  degrees: number[];
+  register: () => number;
 }
 
 export class MusicSynth {
@@ -75,6 +127,7 @@ export class MusicSynth {
   private p: MusicParams = { ...DEFAULT_MUSIC_PARAMS };
   private readonly rng: Rng;
   private readonly rngKeys: Rng;
+  private readonly rngComp: Rng;
   private events: MusicEvent[] = [];
 
   // Pad
@@ -92,7 +145,6 @@ export class MusicSynth {
 
   // Keys
   private keysStep = 0;
-  private nextNoteIn = 0;
   private readonly kActive = new Uint8Array(KEYS_VOICES);
   private readonly kFreq = new Float64Array(KEYS_VOICES);
   private readonly kPhaseC = new Float64Array(KEYS_VOICES);
@@ -106,13 +158,34 @@ export class MusicSynth {
   private readonly kPanR = new Float64Array(KEYS_VOICES);
   private readonly kRatio = new Float64Array(KEYS_VOICES);
 
-  // Delay (keys only)
+  // Delay (keys and plucks)
   private readonly dl: Float32Array;
   private readonly dr: Float32Array;
   private dPos = 0;
   private readonly dMask: number;
   private dlLp = 0;
   private drLp = 0;
+
+  // New voices
+  private readonly drone: Drone;
+  private readonly bowls: Bowls;
+  private readonly plucks: Plucks;
+  private readonly choir: Choir;
+  private readonly beatKit: Beat;
+  private readonly shimmerFx: Shimmer;
+  private readonly vL = new Float32Array(BLOCK_MAX);
+  private readonly vR = new Float32Array(BLOCK_MAX);
+  private readonly pL = new Float32Array(BLOCK_MAX);
+  private readonly pR = new Float32Array(BLOCK_MAX);
+  private readonly bL = new Float32Array(BLOCK_MAX);
+  private readonly bR = new Float32Array(BLOCK_MAX);
+
+  // Composition
+  private readonly players: Player[];
+  private arpIdx = 0;
+  private phrasePlaying = true;
+  private phraseLeft = 0;
+  private lastRhythm: Rhythm = 'free';
 
   // Breath: slow OU process on overall density
   private breath = 0;
@@ -125,11 +198,24 @@ export class MusicSynth {
   ) {
     this.rng = createRng(seed, 'music.pad');
     this.rngKeys = createRng(seed, 'music.keys');
+    this.rngComp = createRng(seed, 'music.composer');
     let size = 1;
     while (size < fs * 1.5) size <<= 1;
     this.dl = new Float32Array(size);
     this.dr = new Float32Array(size);
     this.dMask = size - 1;
+    this.drone = new Drone(fs, createRng(seed, 'music.drone'));
+    this.bowls = new Bowls(fs, createRng(seed, 'music.bowls'));
+    this.plucks = new Plucks(fs, createRng(seed, 'music.plucks'));
+    this.choir = new Choir(fs, createRng(seed, 'music.choir'));
+    this.beatKit = new Beat(fs, createRng(seed, 'music.beat'));
+    this.shimmerFx = new Shimmer(fs);
+    const n = () => this.p.scale.cents.length;
+    this.players = [
+      { voice: 'keys', rate: 1, gated: true, nextIn: 0, loops: [], loopSeconds: [17.3, 21.1, 25.7], degrees: [0, 1, 2, 3, 4, 6], register: () => n() * this.p.keysOctave },
+      { voice: 'pluck', rate: 1.3, gated: true, nextIn: 0, loops: [], loopSeconds: [13.9, 19.3, 23.5], degrees: [0, 2, 4, 7], register: () => n() * 2 },
+      { voice: 'bowl', rate: 0.22, gated: false, nextIn: 0, loops: [], loopSeconds: [19.9, 27.1], degrees: [0, 4], register: () => n() },
+    ];
     this.setParams(params ?? {});
     for (let v = 0; v < PAD_VOICES; v++) {
       this.padPhaseA[v] = this.rng.next();
@@ -140,8 +226,11 @@ export class MusicSynth {
     this.chordStep = 0;
     this.applyChord(true);
     this.nextChordIn = this.chordInterval();
-    this.nextNoteIn = this.rngKeys.range(1, 4) * fs;
+    for (const pl of this.players) pl.nextIn = this.rngComp.range(1, 5) * fs;
+    this.players[0].nextIn = this.rngKeys.range(1, 4) * fs;
     this.keysStep = this.p.scale.cents.length * this.p.keysOctave;
+    this.phraseLeft = this.rngComp.range(5, 10) * fs;
+    this.padLevelCur = this.p.padLevel;
   }
 
   get params(): Readonly<MusicParams> {
@@ -151,6 +240,7 @@ export class MusicSynth {
   setParams(patch: Partial<MusicParams>): void {
     const scaleChanged = patch.scale !== undefined;
     this.p = { ...this.p, ...patch, scale: { ...this.p.scale, ...(patch.scale ?? {}) } };
+    this.drone.setScale(this.droneRoot(), this.p.scale.cents);
     // Re-voice the current chord in the new scale; the glide makes the change smooth.
     if (scaleChanged && this.padTarget.length) this.applyChord(false);
   }
@@ -159,6 +249,14 @@ export class MusicSynth {
     const e = this.events;
     this.events = [];
     return e;
+  }
+
+  /** The drone sits on the key's root, in the 55–110 Hz octave. */
+  private droneRoot(): number {
+    let f = this.p.scale.rootHz;
+    while (f > 110) f /= 2;
+    while (f < 55) f *= 2;
+    return f;
   }
 
   private chordInterval(): number {
@@ -171,12 +269,14 @@ export class MusicSynth {
     const n = this.p.scale.cents.length;
     // Keep the chord root in the lowest octave or two.
     this.chordStep = ((this.chordStep % n) + n) % n;
-    const steps = [this.chordStep, this.chordStep + 2, this.chordStep + 4 + (n <= 5 ? 0 : 0)];
+    const steps = [this.chordStep, this.chordStep + 2, this.chordStep + 4];
     for (let v = 0; v < PAD_VOICES; v++) {
       const f = scaleStepHz(this.p.scale, steps[v]);
       this.padTarget[v] = f;
       if (snap || this.padFreq[v] === 0) this.padFreq[v] = f;
     }
+    // The choir sings the same chord an octave up, opened out.
+    this.choir.setChord([steps[0] + n, steps[1] + n, steps[2] + n].map((s) => scaleStepHz(this.p.scale, s)));
     this.events.push({ kind: 'chord', frame: this.frame, hz: this.padTarget[0], velocity: 1, step: this.chordStep });
   }
 
@@ -188,12 +288,20 @@ export class MusicSynth {
     this.applyChord(false);
   }
 
-  private noteRate(): number {
-    const breath = Math.max(0, Math.min(1.3, 0.55 + 0.5 * this.breath));
-    return (this.p.density / 60) * breath;
+  private voiceLevel(v: MusicVoice): number {
+    return v === 'keys' ? this.p.keysLevel : v === 'pluck' ? this.p.plucksLevel : this.p.bowlsLevel;
   }
 
-  private startNote(offset: number): void {
+  /** Notes per second for one player, including the slow breath. */
+  private rateOf(pl: Player): number {
+    const breath = Math.max(0, Math.min(1.3, 0.55 + 0.5 * this.breath));
+    const base = (this.p.density / 60) * pl.rate;
+    return pl.voice === 'bowl' ? Math.max(base, this.p.density > 0 ? 1 / 45 : 0) : base * breath;
+  }
+
+  // ---------------------------------------------------------------- note choice
+
+  private keysWalk(): number {
     const rng = this.rngKeys;
     const n = this.p.scale.cents.length;
     const centre = n * this.p.keysOctave + Math.floor(n / 2);
@@ -203,11 +311,35 @@ export class MusicSynth {
     let step = this.keysStep + steps[rng.weightedIndex(weights)];
     if (Math.abs(step - centre) > n * 1.2) step += step > centre ? -2 : 2;
     this.keysStep = step;
-    const f = scaleStepHz(this.p.scale, step);
-    const velocity = rng.range(0.35, 1);
-    const pan = rng.range(-0.6, 0.6);
-    const decaySec = rng.range(1.8, 3.5);
+    return step;
+  }
 
+  private freeStep(pl: Player): number {
+    if (pl.voice === 'keys') return this.keysWalk();
+    if (pl.voice === 'pluck') {
+      // Broken chords: mostly upward, sometimes turning back.
+      const tones = [0, 2, 4, 7, 9];
+      this.arpIdx += this.rngComp.chance(0.8) ? 1 : -1;
+      const i = ((this.arpIdx % tones.length) + tones.length) % tones.length;
+      return pl.register() + this.chordStep + tones[i];
+    }
+    return pl.register() + this.chordStep + (this.rngComp.chance(0.65) ? 0 : 4);
+  }
+
+  private play(pl: Player, step: number, velocity: number): void {
+    const f = scaleStepHz(this.p.scale, step);
+    if (f >= this.fs * 0.2) return;
+    const ring = this.p.ring;
+    if (pl.voice === 'keys') this.startKeys(f, velocity);
+    else if (pl.voice === 'pluck') this.plucks.pluck(f, velocity, this.p.brightness, ring);
+    else this.bowls.strike(f, velocity, ring);
+    this.events.push({ kind: 'note', voice: pl.voice, frame: this.frame, hz: f, velocity, step });
+  }
+
+  private startKeys(f: number, velocity: number): void {
+    const rng = this.rngKeys;
+    const pan = rng.range(-0.6, 0.6);
+    const decaySec = rng.range(1.8, 3.5) * this.p.ring;
     let v = -1;
     for (let i = 0; i < KEYS_VOICES; i++) if (!this.kActive[i]) { v = i; break; }
     if (v < 0) {
@@ -215,20 +347,91 @@ export class MusicSynth {
       let min = Infinity;
       for (let i = 0; i < KEYS_VOICES; i++) if (this.kAmp[i] < min) { min = this.kAmp[i]; v = i; }
     }
-    if (f >= this.fs * 0.2) return;
     this.kActive[v] = 1;
     this.kFreq[v] = f;
     this.kPhaseC[v] = 0;
     this.kPhaseM[v] = 0;
     this.kAmp[v] = velocity * 0.22;
     this.kAmpMul[v] = Math.exp(-1 / (decaySec * this.fs));
-    this.kIndex[v] = 1.2 + velocity * 1.8;
+    this.kIndex[v] = (0.6 + 1.6 * this.p.brightness) + velocity * 1.4;
     this.kIndexMul[v] = Math.exp(-1 / (0.35 * this.fs));
     this.kAttack[v] = 0;
     this.kPanL[v] = Math.cos(((pan + 1) * Math.PI) / 4);
     this.kPanR[v] = Math.sin(((pan + 1) * Math.PI) / 4);
     this.kRatio[v] = this.p.keysRatio;
-    this.events.push({ kind: 'note', frame: this.frame + offset, hz: f, velocity, step });
+  }
+
+  // ---------------------------------------------------------------- timing
+
+  /** Samples until the next swung eighth on the beat grid, at least `min` samples away. */
+  private toGrid(min: number): number {
+    const beatsPerSample = this.p.tempo / 60 / this.fs;
+    const now = this.beatKit.position;
+    const target = now + min * beatsPerSample;
+    const straight = Math.ceil(target * 2 - 1e-9) / 2;
+    const swingOffset = straight % 1 === 0.5 ? this.p.swing - 0.5 : 0;
+    let at = straight + swingOffset;
+    if (at < target) at += 0.5;
+    return (at - now) / beatsPerSample;
+  }
+
+  private makeLoops(pl: Player): void {
+    const rng = this.rngComp;
+    pl.loops = pl.loopSeconds.map((base) => ({
+      base,
+      pos: rng.next(),
+      notes: Array.from({ length: rng.chance(0.4) ? 2 : 1 }, () => ({ at: rng.next(), deg: rng.pick(pl.degrees), vel: rng.range(0.45, 0.9) })),
+    }));
+  }
+
+  private runLoops(pl: Player, frames: number): void {
+    if (pl.loops.length === 0) this.makeLoops(pl);
+    // Denser music → shorter loops; more breath → longer ones (more silence per note).
+    const stretch = (1 + 1.5 * this.p.breath) * Math.min(2, Math.max(0.4, 8 / Math.max(1, this.p.density * Math.max(0.5, pl.rate))));
+    for (const loop of pl.loops) {
+      const len = loop.base * stretch * this.fs;
+      const before = loop.pos;
+      loop.pos += frames / len;
+      const wrapped = loop.pos >= 1;
+      if (wrapped) loop.pos -= 1;
+      for (const note of loop.notes) {
+        const hit = wrapped ? note.at > before || note.at <= loop.pos : note.at > before && note.at <= loop.pos;
+        if (hit) this.play(pl, pl.register() + this.chordStep + note.deg, note.vel);
+      }
+      // Loops slowly re-write themselves so the piece keeps evolving.
+      if (wrapped && this.rngComp.chance(0.3)) {
+        const note = this.rngComp.pick(loop.notes);
+        note.deg = this.rngComp.pick(pl.degrees);
+        note.at = this.rngComp.next();
+      }
+    }
+  }
+
+  private schedule(frames: number): void {
+    const fs = this.fs;
+    const p = this.p;
+    if (p.rhythm !== this.lastRhythm) {
+      for (const pl of this.players) { pl.loops = []; pl.nextIn = Math.min(pl.nextIn, 2 * fs); }
+      this.lastRhythm = p.rhythm;
+    }
+    // Phrases and rests (free and pulse modes).
+    this.phraseLeft -= frames;
+    if (this.phraseLeft <= 0) {
+      this.phrasePlaying = !this.phrasePlaying;
+      const play = this.rngComp.range(4, 10);
+      this.phraseLeft = (this.phrasePlaying ? play : play * (0.15 + 2.6 * p.breath)) * fs;
+    }
+    for (const pl of this.players) {
+      if (this.voiceLevel(pl.voice) < 0.01 || p.density <= 0) continue;
+      if (p.rhythm === 'loops') { this.runLoops(pl, frames); continue; }
+      pl.nextIn -= frames;
+      if (pl.nextIn > 0) continue;
+      const rate = this.rateOf(pl);
+      const rng = pl.voice === 'keys' ? this.rngKeys : this.rngComp;
+      if (rate > 1e-4 && (!pl.gated || this.phrasePlaying)) this.play(pl, this.freeStep(pl), rng.range(0.35, 1));
+      const gap = rate > 1e-4 ? rng.exponential(rate) * fs : 2 * fs;
+      pl.nextIn = p.rhythm === 'pulse' ? this.toGrid(Math.max(gap, fs * 0.05)) : gap;
+    }
   }
 
   /**
@@ -242,6 +445,13 @@ export class MusicSynth {
     sendR: Float32Array,
     frames = outL.length,
   ): void {
+    if (frames > BLOCK_MAX) {
+      for (let i = 0; i < frames; i += BLOCK_MAX) {
+        const k = Math.min(BLOCK_MAX, frames - i);
+        this.process(outL.subarray(i, i + k), outR.subarray(i, i + k), sendL.subarray(i, i + k), sendR.subarray(i, i + k), k);
+      }
+      return;
+    }
     const fs = this.fs;
     const p = this.p;
     const dt = frames / fs;
@@ -253,20 +463,7 @@ export class MusicSynth {
       this.nextChord();
       this.nextChordIn = this.chordInterval();
     }
-
-    // Keys scheduling (offsets within the block).
-    const rate = this.noteRate();
-    const starts: number[] = [];
-    if (rate > 1e-4) {
-      while (this.nextNoteIn < frames) {
-        starts.push(Math.max(0, Math.floor(this.nextNoteIn)));
-        this.nextNoteIn += this.rngKeys.exponential(rate) * fs;
-      }
-      this.nextNoteIn -= frames;
-    } else {
-      this.nextNoteIn = Math.max(this.nextNoteIn - frames, fs);
-    }
-    let si = 0;
+    this.schedule(frames);
 
     const glide = 1 - Math.exp(-1 / (4 * fs));
     const detuneRatio = Math.pow(2, p.detune / 1200);
@@ -278,34 +475,39 @@ export class MusicSynth {
     const dB = Math.round(0.71 * fs);
     const dLp = Math.exp((-2 * Math.PI * 3200) / fs);
 
-    for (let n = 0; n < frames; n++) {
-      while (si < starts.length && starts[si] <= n) {
-        this.startNote(n);
-        si++;
-      }
+    // Plucks go through the keys' delay too, so they render first.
+    const pL = this.pL, pR = this.pR;
+    pL.fill(0, 0, frames);
+    pR.fill(0, 0, frames);
+    this.plucks.process(pL, pR, frames, p.plucksLevel);
 
+    for (let n = 0; n < frames; n++) {
       // ---- pad
       this.padLevelCur += (padGainTarget - this.padLevelCur) * levelSmooth;
       let pl = 0;
       let pr = 0;
-      for (let v = 0; v < PAD_VOICES; v++) {
-        this.padFreq[v] += (this.padTarget[v] - this.padFreq[v]) * glide;
-        const fA = this.padFreq[v] * detuneRatio;
-        const fB = this.padFreq[v] / detuneRatio;
-        const incA = fA / fs;
-        const incB = fB / fs;
-        this.padPhaseA[v] += incA;
-        if (this.padPhaseA[v] >= 1) this.padPhaseA[v] -= 1;
-        this.padPhaseB[v] += incB;
-        if (this.padPhaseB[v] >= 1) this.padPhaseB[v] -= 1;
-        this.padSwell[v] += this.padSwellRate[v];
-        const swell = 0.6 + 0.4 * Math.sin(this.padSwell[v]);
-        const a = saw(this.padPhaseA[v], incA) * swell;
-        const b = saw(this.padPhaseB[v], incB) * swell;
-        // Voice 0 centre, 1 left-ish, 2 right-ish; each osc slightly spread.
-        const spread = v === 0 ? 0 : v === 1 ? -0.35 : 0.35;
-        pl += a * (0.55 - spread * 0.5) + b * (0.45 - spread * 0.5);
-        pr += a * (0.45 + spread * 0.5) + b * (0.55 + spread * 0.5);
+      if (this.padLevelCur > 1e-5 || padGainTarget > 0) {
+        for (let v = 0; v < PAD_VOICES; v++) {
+          this.padFreq[v] += (this.padTarget[v] - this.padFreq[v]) * glide;
+          const fA = this.padFreq[v] * detuneRatio;
+          const fB = this.padFreq[v] / detuneRatio;
+          const incA = fA / fs;
+          const incB = fB / fs;
+          this.padPhaseA[v] += incA;
+          if (this.padPhaseA[v] >= 1) this.padPhaseA[v] -= 1;
+          this.padPhaseB[v] += incB;
+          if (this.padPhaseB[v] >= 1) this.padPhaseB[v] -= 1;
+          this.padSwell[v] += this.padSwellRate[v];
+          const swell = 0.6 + 0.4 * Math.sin(this.padSwell[v]);
+          const a = saw(this.padPhaseA[v], incA) * swell;
+          const b = saw(this.padPhaseB[v], incB) * swell;
+          // Voice 0 centre, 1 left-ish, 2 right-ish; each osc slightly spread.
+          const spread = v === 0 ? 0 : v === 1 ? -0.35 : 0.35;
+          pl += a * (0.55 - spread * 0.5) + b * (0.45 - spread * 0.5);
+          pr += a * (0.45 + spread * 0.5) + b * (0.55 + spread * 0.5);
+        }
+      } else {
+        for (let v = 0; v < PAD_VOICES; v++) this.padFreq[v] += (this.padTarget[v] - this.padFreq[v]) * glide;
       }
       this.filterLfo += lfoInc;
       const cut = Math.min(baseCut * (1 + 0.35 * Math.sin(this.filterLfo)), fs * 0.2);
@@ -337,10 +539,10 @@ export class MusicSynth {
         kl += s * this.kPanL[v];
         kr += s * this.kPanR[v];
       }
-      kl *= p.keysLevel;
-      kr *= p.keysLevel;
+      kl = kl * p.keysLevel + pL[n];
+      kr = kr * p.keysLevel + pR[n];
 
-      // ---- ping-pong delay on keys
+      // ---- ping-pong delay on keys and plucks
       const rA = this.dl[(this.dPos - dA) & this.dMask];
       const rB = this.dr[(this.dPos - dB) & this.dMask];
       this.dlLp = (1 - dLp) * rA + dLp * this.dlLp;
@@ -349,15 +551,35 @@ export class MusicSynth {
       this.dr[this.dPos & this.dMask] = kr + this.dlLp * 0.38;
       this.dPos++;
 
-      const L = padL + kl + this.dlLp * 0.3;
-      const R = padR + kr + this.drLp * 0.3;
-      outL[n] = L;
-      outR[n] = R;
+      outL[n] = padL + kl + this.dlLp * 0.3;
+      outR[n] = padR + kr + this.drLp * 0.3;
       sendL[n] = padL * 0.8 + kl + this.dlLp * 0.3;
       sendR[n] = padR * 0.8 + kr + this.drLp * 0.3;
     }
 
-    if (!Number.isFinite(this.filtL[1]) || !Number.isFinite(this.dlLp)) this.resetState(outL, outR, sendL, sendR, frames);
+    // ---- drone, bowls, choir: sustained voices, mostly into the space
+    const vL = this.vL, vR = this.vR;
+    vL.fill(0, 0, frames);
+    vR.fill(0, 0, frames);
+    this.drone.process(vL, vR, frames, p.droneLevel, p.binaural, p.binauralHz);
+    this.bowls.process(vL, vR, frames, p.bowlsLevel);
+    this.choir.process(vL, vR, frames, p.choirLevel, p.detune);
+    // ---- beat: dry, a touch of room
+    const bL = this.bL, bR = this.bR;
+    bL.fill(0, 0, frames);
+    bR.fill(0, 0, frames);
+    this.beatKit.process(bL, bR, frames, p.beat, p.tempo, p.swing, p.brightness);
+    for (const h of this.beatKit.hits) this.events.push({ kind: 'beat', frame: this.frame + h.offset, hz: 0, velocity: h.vel, step: h.kind });
+    const bg = p.beatLevel;
+    for (let n = 0; n < frames; n++) {
+      outL[n] += vL[n] + bL[n] * bg;
+      outR[n] += vR[n] + bR[n] * bg;
+      sendL[n] += vL[n] * 0.9 + bL[n] * bg * 0.08;
+      sendR[n] += vR[n] * 0.9 + bR[n] * bg * 0.08;
+    }
+    this.shimmerFx.process(sendL, sendR, frames, p.shimmer);
+
+    if (!Number.isFinite(this.filtL[1]) || !Number.isFinite(this.dlLp) || !Number.isFinite(sendL[0])) this.resetState(outL, outR, sendL, sendR, frames);
     this.frame += frames;
   }
 

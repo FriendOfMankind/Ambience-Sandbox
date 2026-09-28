@@ -23,8 +23,9 @@ const scenarios = [
   { name: 'chime storm (12 strikes/s, all tubes, full velocity)', trip: 0.6, chimes: 12 },
   { name: 'note spam (8 notes/s) + chord every 1.5 s', trip: 0.6, notes: 8, chord: 1.5 },
   { name: 'downpour (40 near drops per step)', trip: 0.6, rain: 40 },
-  { name: 'everything at once, Trip 100 (kaleidoscope on)', trip: 1, chimes: 12, notes: 8, chord: 1.5, rain: 40 },
-  { name: 'everything at once, reduced motion', trip: 0.6, chimes: 12, notes: 8, chord: 1.5, rain: 40, reduced: true },
+  { name: 'lo-fi kick at 100 BPM + 4 bowl strikes/s', trip: 0.6, kicks: 100 / 60, bowls: 4 },
+  { name: 'everything at once, Trip 100 (kaleidoscope on)', trip: 1, chimes: 12, notes: 8, chord: 1.5, rain: 40, kicks: 100 / 60, bowls: 4 },
+  { name: 'everything at once, reduced motion', trip: 0.6, chimes: 12, notes: 8, chord: 1.5, rain: 40, kicks: 100 / 60, bowls: 4, reduced: true },
 ];
 
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
@@ -59,6 +60,8 @@ for (const sc of scenarios) {
         const count = (rate) => Math.floor((j + 1) * DT * rate) - Math.floor(j * DT * rate);
         if (sc.chimes) for (let i = 0, n = count(sc.chimes); i < n; i++) ev.chimes.push({ frame: at(i, n), tube: (j * 5 + i) % 6, velocity: 1 });
         if (sc.notes) for (let i = 0, n = count(sc.notes); i < n; i++) ev.music.push({ kind: 'note', frame: at(i, n), hz: 220 * Math.pow(2, ((j * 7 + i * 5) % 24) / 12), velocity: 1, step: j });
+        if (sc.kicks) for (let i = 0, n = count(sc.kicks); i < n; i++) ev.music.push({ kind: 'beat', frame: at(i, n), hz: 0, velocity: 1, step: 0 });
+        if (sc.bowls) for (let i = 0, n = count(sc.bowls); i < n; i++) ev.music.push({ kind: 'note', voice: 'bowl', frame: at(i, n), hz: 110 * Math.pow(2, ((j * 5 + i * 7) % 12) / 12), velocity: 1, step: j });
         if (sc.chord && count(1 / sc.chord) > 0) ev.music.push({ kind: 'chord', frame: at(0, 1), hz: 110 * Math.pow(2, (j % 12) / 12), velocity: 1, step: j });
         if (sc.rain) for (let i = 0; i < sc.rain; i++) ev.rain.push({ frame: at(i, sc.rain), pan: Math.sin(j * 12.9898 + i * 78.233) , diameterMm: 1 + (i % 5), surface: ['water', 'tin', 'leaves', 'bells'][i % 4], bubbleHz: 800 });
         const features = { level: { rain: sc.rain ? 0.2 : 0, wind: 0.1, chimes: sc.chimes ? 0.2 : 0, music: sc.notes ? 0.25 : 0 }, windSpeed: 1.2, gust: Math.sin(j * 0.3), chordStep: j };

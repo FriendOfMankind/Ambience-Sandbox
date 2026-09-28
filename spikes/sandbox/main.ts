@@ -4,12 +4,13 @@ import type { WorldOutMessage } from '../../src/audio/worklets/world.worklet';
 import type { LimiterOutMessage } from '../../src/audio/worklets/limiter.worklet';
 import { LAYERS, type LayerId, type WorldParamsPatch } from '../../src/audio/world/WorldSynth';
 import { ChimeSynth } from '../../src/audio/nature/chimes/ChimeSynth';
-import { SCALES, type ScaleKey } from '../../src/audio/music/scales';
+import { DEFAULT_KEY, FAMILIES, lightName, ROOT_NAMES, type ScaleFamily } from '../../src/audio/music/scales';
+import { DEFAULT_MUSIC_PARAMS } from '../../src/audio/music/MusicSynth';
 import { SURFACE_IDS, SURFACES } from '../../src/audio/nature/rain/surfaces';
 import { dbToGain, gainToDb } from '../../src/audio/dsp/loudness';
-import { SCENES, sceneState, stateToPatch, type SceneState } from './scenes';
+import { purityDetune, SCENES, sceneState, spacePatch, stateScale, stateToPatch, type SceneState } from './scenes';
 import { SceneView } from './view';
-import { LAYER_HUE, SceneView3D } from './view3d';
+import { SceneView3D } from './view3d';
 import { dial, fromInput, inputRange, toInput, type SliderSpec } from './dials';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -215,53 +216,146 @@ const LAYER_INFO: Record<LayerId, { title: string; blurb: string }> = {
   rain: { title: 'Rain', blurb: 'Every drop synthesised: size, surface, distance.' },
   wind: { title: 'Wind', blurb: 'Also moves the rain and swings the chimes.' },
   chimes: { title: 'Wind chimes', blurb: 'Tuned to the key. Only ring when the wind reaches them.' },
-  music: { title: 'Music', blurb: 'Pad and sparse keys, wandering the key.' },
+  music: { title: 'Music', blurb: 'A generative ensemble; it shapes and colours the object.' },
 };
 
-function buildStrips(): void {
-  const root = $('strips');
-  root.innerHTML = '';
+const m = () => w().music;
+const key = () => (state.key ??= { ...DEFAULT_KEY });
+const musicChange = () => send({ music: w().music });
 
-  for (const id of LAYERS) {
-    currentLayer = id;
-    const card = document.createElement('section');
-    card.className = 'strip';
-    card.dataset.layer = id;
-    const head = document.createElement('div');
-    head.className = 'strip-head';
-    const h = document.createElement('h2');
-    h.textContent = LAYER_INFO[id].title;
+/** Send the scale built from the mood settings to everything pitched. */
+function sendScale(): void {
+  const scale = stateScale(state);
+  w().scale = scale;
+  send({ scale, rain: { scale: { ...scale, enabled: state.rainInKey } } });
+  updateTubes();
+}
+
+const RHYTHMS = ['free', 'loops', 'pulse'] as const;
+const RHYTHM_LABEL = { free: 'free (no grid)', loops: 'loops (Eno-style)', pulse: 'pulse (on the beat)' };
+
+function purityWord(v: number): string {
+  if (v > 0.95) return 'just · beat-free';
+  if (v > 0.6) return 'nearly just';
+  if (v > 0.4) return 'equal temperament';
+  if (v > 0.2) return 'detuned';
+  return 'eerie';
+}
+function beatWord(v: number): string {
+  if (v < 0.02) return 'off';
+  if (v < 0.35) return 'heartbeat';
+  if (v < 0.6) return 'brushes';
+  return 'soft lo-fi kit';
+}
+
+/** The music's mood and movement macros, each a get/set over the state. */
+const MACROS: SliderSpec[] = [
+  { id: 'mood-light', label: 'Light', min: 0, max: 0.999, step: 0.001, get: () => key().light, set: (v) => { key().light = v; sendScale(); }, fmt: () => lightName(key()) },
+  { id: 'mood-purity', label: 'Purity', min: 0, max: 1, step: 0.01, get: () => key().purity, set: (v) => { key().purity = v; m().detune = purityDetune(v); sendScale(); }, fmt: purityWord },
+  { id: 'mood-warmth', label: 'Warmth', min: 0, max: 1, step: 0.01, get: () => 1 - (m().brightness ?? 0.4), set: (v) => (m().brightness = 1 - v), fmt: (v) => (v > 0.75 ? 'dark & warm' : v > 0.5 ? 'warm' : v > 0.25 ? 'clear' : 'bright') },
+  { id: 'mood-space', label: 'Space', min: 0, max: 1, step: 0.01, get: () => state.space, set: (v) => { state.space = v; const sp = spacePatch(v); Object.assign(w().reverb, sp.reverb); w().mix.music.send = sp.send; m().shimmer = sp.shimmer; send({ reverb: w().reverb, mix: { music: { send: sp.send } } }); }, fmt: (v) => (v < 0.25 ? 'close' : v < 0.55 ? 'room' : v < 0.8 ? 'hall' : 'cathedral + shimmer') },
+  { id: 'move-motion', label: 'Motion', min: 0, max: 30, step: 0.5, get: () => m().density ?? 8, set: (v) => (m().density = v), fmt: (v) => (v < 0.5 ? 'still' : `${v.toFixed(v < 10 ? 1 : 0)} notes/min`) },
+  { id: 'move-breath', label: 'Breath', min: 0, max: 1, step: 0.01, get: () => m().breath ?? 0.5, set: (v) => (m().breath = v), fmt: (v) => `rests ${(0.15 + 2.6 * v).toFixed(1)}× phrases` },
+  { id: 'move-rhythm', label: 'Rhythm', min: 0, max: 2, step: 1, get: () => RHYTHMS.indexOf(m().rhythm ?? 'free'), set: (v) => (m().rhythm = RHYTHMS[Math.round(v)]), fmt: (v) => RHYTHM_LABEL[RHYTHMS[Math.round(v)]] },
+  { id: 'move-tempo', label: 'Tempo', min: 40, max: 100, step: 1, get: () => m().tempo ?? 66, set: (v) => (m().tempo = v), fmt: (v) => `${Math.round(v)} BPM` },
+  { id: 'move-beat', label: 'Beat', min: 0, max: 1, step: 0.01, get: () => m().beat ?? 0, set: (v) => (m().beat = v), fmt: beatWord },
+  { id: 'move-evolve', label: 'Evolve', min: 0, max: 1, step: 0.01, get: () => Math.log(120 / (m().chordSeconds ?? 35)) / Math.log(12), set: (v) => (m().chordSeconds = 120 * Math.pow(12, -v)), fmt: () => `chords every ~${Math.round(m().chordSeconds ?? 35)} s` },
+];
+
+const VOICES: [string, string, keyof typeof DEFAULT_MUSIC_PARAMS, string][] = [
+  ['voice-drone', 'Drone', 'droneLevel', 'Harmonic series on the root. Only overtones that fit the key sound.'],
+  ['voice-pad', 'Pad', 'padLevel', 'Detuned saws through a slowly breathing filter.'],
+  ['voice-bowls', 'Bowls', 'bowlsLevel', 'Singing bowls: each partial is a beating pair.'],
+  ['voice-keys', 'Keys', 'keysLevel', 'FM e-piano / bell, wandering the scale.'],
+  ['voice-plucks', 'Plucks', 'plucksLevel', 'Plucked strings (Karplus–Strong) arpeggiating the chord.'],
+  ['voice-choir', 'Choir', 'choirLevel', 'Voices through moving vowel formants.'],
+];
+
+interface Strip { card: HTMLElement; main: HTMLElement; more: HTMLElement }
+function strip(parent: HTMLElement, title: string, blurb: string, power: LayerId | null): Strip {
+  const card = document.createElement('section');
+  card.className = 'strip';
+  const head = document.createElement('div');
+  head.className = 'strip-head';
+  const h = document.createElement('h2');
+  h.textContent = title;
+  head.append(h);
+  if (power) {
     const onBtn = document.createElement('button');
     onBtn.className = 'power';
-    onBtn.id = `on-${id}`;
-    const syncOn = () => {
-      const isOn = w().mix[id].on;
+    onBtn.id = `on-${power}`;
+    onBtn.addEventListener('click', () => togglePower(power));
+    addSync(`on-${power}`, () => {
+      const isOn = w().mix[power].on;
       onBtn.textContent = isOn ? 'On' : 'Off';
       onBtn.setAttribute('aria-pressed', String(isOn));
       card.classList.toggle('off', !isOn);
-    };
-    onBtn.addEventListener('click', () => togglePower(id));
-    addSync(`on-${id}`, syncOn);
+    });
     const meterEl = document.createElement('div');
     meterEl.className = 'meter';
-    meterEl.innerHTML = `<span id="meter-${id}"></span>`;
-    head.append(h, meterEl, onBtn);
-    const blurb = document.createElement('p');
-    blurb.className = 'blurb';
-    blurb.textContent = LAYER_INFO[id].blurb;
-    card.append(head, blurb);
+    meterEl.innerHTML = `<span id="meter-${power}"></span>`;
+    head.append(meterEl, onBtn);
+  }
+  const p = document.createElement('p');
+  p.className = 'blurb';
+  p.textContent = blurb;
+  const main = document.createElement('div');
+  main.className = 'ctls';
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'More';
+  const more = document.createElement('div');
+  more.className = 'ctls';
+  details.append(summary, more);
+  card.append(head, p, main, details);
+  parent.append(card);
+  return { card, main, more };
+}
 
-    const main = document.createElement('div');
-    main.className = 'ctls';
-    const more = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = 'More';
-    const moreBody = document.createElement('div');
-    moreBody.className = 'ctls';
-    more.append(summary, moreBody);
+const levelFmt = (v: number) => (v < 0.005 ? '−∞ dB' : `${gainToDb(v).toFixed(1)} dB`);
 
-    const mixChange = () => send({ mix: { [id]: w().mix[id] } });
-    slider(main, { id: `${id}-level`, label: 'Level', min: 0, max: 2, step: 0.01, get: () => w().mix[id].level, set: (v) => (w().mix[id].level = v), fmt: (v) => (v < 0.005 ? '−∞ dB' : `${gainToDb(v).toFixed(1)} dB`) }, mixChange);
+function buildStrips(): void {
+  const musicRoot = $('music-strips');
+  const ambRoot = $('ambience-strips');
+  musicRoot.innerHTML = '';
+  ambRoot.innerHTML = '';
+
+  // ---------------------------------------------------------------- music
+  currentLayer = 'music';
+  const mixChange = (id: LayerId) => () => send({ mix: { [id]: w().mix[id] } });
+  const mood = strip(musicRoot, 'Music', LAYER_INFO.music.blurb, 'music');
+  slider(mood.main, { id: 'music-level', label: 'Level', min: 0, max: 2, step: 0.01, get: () => w().mix.music.level, set: (v) => (w().mix.music.level = v), fmt: levelFmt }, mixChange('music'));
+  for (const spec of MACROS) slider(mood.main, spec, musicChange);
+  slider(mood.more, { id: 'music-swing', label: 'Swing', min: 0.5, max: 0.7, step: 0.005, get: () => m().swing ?? 0.58, set: (v) => (m().swing = v), fmt: (v) => (v < 0.52 ? 'straight' : v > 0.64 ? 'triplet' : `${Math.round(v * 100)}%`) }, musicChange);
+  slider(mood.more, { id: 'music-send', label: 'Reverb send', min: 0, max: 1, step: 0.01, get: () => w().mix.music.send, set: (v) => (w().mix.music.send = v), fmt: pct }, mixChange('music'));
+  slider(mood.more, { id: 'music-shimmer', label: 'Shimmer', min: 0, max: 1, step: 0.01, get: () => m().shimmer ?? 0, set: (v) => (m().shimmer = v), fmt: pct }, musicChange);
+  slider(mood.more, { id: 'music-detune', label: 'Detune', min: 0, max: 60, step: 0.5, get: () => m().detune!, set: (v) => (m().detune = v), fmt: (v) => `${v.toFixed(1)} cents${v > 30 ? ' (seasick)' : ''}` }, musicChange);
+
+  const inst = strip(musicRoot, 'Instruments', 'Mix the ensemble. Set a voice to zero to take it out.', null);
+  for (const [id, label, prop, blurb] of VOICES) {
+    slider(inst.main, { id, label, min: 0, max: 2, step: 0.01, get: () => (m()[prop] as number) ?? 0, set: (v) => ((m() as Record<string, unknown>)[prop] = v), fmt: times }, musicChange);
+    void blurb;
+  }
+  slider(inst.more, { id: 'music-ring', label: 'Ring (bowls, plucks, keys)', min: 0.4, max: 2.5, step: 0.01, get: () => m().ring ?? 1, set: (v) => (m().ring = v), fmt: times }, musicChange);
+  slider(inst.more, { id: 'music-ratio', label: 'Keys timbre', min: 0.5, max: 7, step: 0.01, get: () => m().keysRatio!, set: (v) => (m().keysRatio = v), fmt: (v) => `FM ${v.toFixed(2)} · ${Math.abs(v - Math.round(v)) < 0.03 ? 'harmonic' : 'clangy'}` }, musicChange);
+  slider(inst.more, { id: 'music-octave', label: 'Keys register', min: 1, max: 4, step: 1, get: () => m().keysOctave!, set: (v) => (m().keysOctave = v), fmt: (v) => `+${Math.round(v)} oct` }, musicChange);
+  slider(inst.more, { id: 'music-beat-level', label: 'Beat level', min: 0, max: 2, step: 0.01, get: () => m().beatLevel ?? 1, set: (v) => (m().beatLevel = v), fmt: times }, musicChange);
+
+  const extra = strip(musicRoot, 'Tuning extras', 'Optional. Neither has strong evidence behind health claims; they are here because some people like them.', null);
+  toggle(extra.main, 'tune-432', 'Concert pitch A = 432 Hz (instead of 440)', () => key().a4 === 432, (v) => (key().a4 = v ? 432 : 440), () => sendScale());
+  slider(extra.main, { id: 'music-binaural', label: 'Binaural beat (headphones only)', min: 0, max: 1, step: 0.01, get: () => m().binaural ?? 0, set: (v) => (m().binaural = v), fmt: (v) => (v < 0.01 ? 'off' : pct(v)) }, musicChange);
+  slider(extra.main, { id: 'music-binaural-hz', label: 'Beat frequency', min: 2, max: 12, step: 0.1, get: () => m().binauralHz ?? 6, set: (v) => (m().binauralHz = v), fmt: (v) => `${v.toFixed(1)} Hz · ${v < 4 ? 'delta' : v < 8 ? 'theta' : 'alpha'}` }, musicChange);
+
+  // ---------------------------------------------------------------- ambience
+  currentLayer = 'rain';
+  const bus = strip(ambRoot, 'Blend', 'How the music and the natural ambience share the mix.', null);
+  slider(bus.main, { id: 'bus-blend', label: 'Blend', min: 0, max: 1, step: 0.01, get: () => w().bus.blend, set: (v) => (w().bus.blend = v), fmt: blendWord }, () => send({ bus: w().bus }));
+  slider(bus.main, { id: 'bus-support', label: 'Ambience steps aside for music', min: 0, max: 1, step: 0.01, get: () => w().bus.support, set: (v) => (w().bus.support = v), fmt: pct }, () => send({ bus: w().bus }));
+
+  for (const id of ['rain', 'wind', 'chimes'] as const) {
+    currentLayer = id;
+    const { main, more } = strip(ambRoot, LAYER_INFO[id].title, LAYER_INFO[id].blurb, id);
+    slider(main, { id: `${id}-level`, label: 'Level', min: 0, max: 2, step: 0.01, get: () => w().mix[id].level, set: (v) => (w().mix[id].level = v), fmt: levelFmt }, mixChange(id));
 
     if (id === 'rain') {
       const ch = () => send({ rain: w().rain });
@@ -271,17 +365,17 @@ function buildStrips(): void {
         slider(main, { id: `rain-${s}`, label: `On ${SURFACES[s].label.toLowerCase()}`, min: 0, max: 1, step: 0.01, get: () => r().surfaceMix![s], set: (v) => (r().surfaceMix = { ...r().surfaceMix!, [s]: v }), fmt: pct }, ch);
       }
       for (const s of SURFACE_IDS.filter((x) => !['water', 'leaves', 'tin'].includes(x))) {
-        slider(moreBody, { id: `rain-${s}`, label: `On ${SURFACES[s].label.toLowerCase()}`, min: 0, max: 1, step: 0.01, get: () => r().surfaceMix![s], set: (v) => (r().surfaceMix = { ...r().surfaceMix!, [s]: v }), fmt: pct }, ch);
+        slider(more, { id: `rain-${s}`, label: `On ${SURFACES[s].label.toLowerCase()}`, min: 0, max: 1, step: 0.01, get: () => r().surfaceMix![s], set: (v) => (r().surfaceMix = { ...r().surfaceMix!, [s]: v }), fmt: pct }, ch);
       }
-      slider(moreBody, { id: 'rain-size', label: 'Drop size', min: -2, max: 2, step: 0.05, get: () => r().sizeBias!, set: (v) => (r().sizeBias = v), fmt: (v) => (Math.abs(v) < 0.01 ? 'natural' : v.toFixed(2)) }, ch);
-      slider(moreBody, { id: 'rain-near', label: 'Close drops', min: 0, max: 4, step: 0.01, get: () => r().nearDensity!, set: (v) => (r().nearDensity = v), fmt: times }, ch);
-      slider(moreBody, { id: 'rain-far', label: 'Distant wash', min: 0, max: 2, step: 0.01, get: () => r().farLevel!, set: (v) => (r().farLevel = v), fmt: times }, ch);
-      slider(moreBody, { id: 'rain-pitch', label: 'Bubble pitch', min: -3, max: 2, step: 0.05, get: () => r().bubblePitch!, set: (v) => (r().bubblePitch = v), fmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)} oct` }, ch);
-      slider(moreBody, { id: 'rain-glide', label: 'Bubble glide', min: 0, max: 2, step: 0.01, get: () => r().bubbleGlide!, set: (v) => (r().bubbleGlide = v), fmt: (v) => (Math.abs(v - 0.1) < 0.006 ? 'natural' : v.toFixed(2)) }, ch);
-      slider(moreBody, { id: 'rain-stretch', label: 'Time stretch', min: 1, max: 20, log: true, get: () => r().stretch!, set: (v) => (r().stretch = v), fmt: times }, ch);
-      toggle(moreBody, 'rain-key', 'Rain in key (bubbles and bells snap to the key)', () => state.rainInKey, (v) => (state.rainInKey = v), () => send({ rain: { scale: { ...SCALES[state.scaleKey], enabled: state.rainInKey } } }));
-      toggle(moreBody, 'rain-grid', 'Rain on the grid (close drops land on a beat)', () => !!r().grid?.enabled, (v) => (r().grid = { ...r().grid!, enabled: v }), ch);
-      slider(moreBody, { id: 'rain-bpm', label: 'Grid tempo', min: 30, max: 200, step: 1, get: () => r().grid!.bpm, set: (v) => (r().grid = { ...r().grid!, bpm: v }), fmt: (v) => `${Math.round(v)} BPM` }, ch);
+      slider(more, { id: 'rain-size', label: 'Drop size', min: -2, max: 2, step: 0.05, get: () => r().sizeBias!, set: (v) => (r().sizeBias = v), fmt: (v) => (Math.abs(v) < 0.01 ? 'natural' : v.toFixed(2)) }, ch);
+      slider(more, { id: 'rain-near', label: 'Close drops', min: 0, max: 4, step: 0.01, get: () => r().nearDensity!, set: (v) => (r().nearDensity = v), fmt: times }, ch);
+      slider(more, { id: 'rain-far', label: 'Distant wash', min: 0, max: 2, step: 0.01, get: () => r().farLevel!, set: (v) => (r().farLevel = v), fmt: times }, ch);
+      slider(more, { id: 'rain-pitch', label: 'Bubble pitch', min: -3, max: 2, step: 0.05, get: () => r().bubblePitch!, set: (v) => (r().bubblePitch = v), fmt: (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)} oct` }, ch);
+      slider(more, { id: 'rain-glide', label: 'Bubble glide', min: 0, max: 2, step: 0.01, get: () => r().bubbleGlide!, set: (v) => (r().bubbleGlide = v), fmt: (v) => (Math.abs(v - 0.1) < 0.006 ? 'natural' : v.toFixed(2)) }, ch);
+      slider(more, { id: 'rain-stretch', label: 'Time stretch', min: 1, max: 20, log: true, get: () => r().stretch!, set: (v) => (r().stretch = v), fmt: times }, ch);
+      toggle(more, 'rain-key', 'Rain in key (bubbles and bells snap to the key)', () => state.rainInKey, (v) => (state.rainInKey = v), () => send({ rain: { scale: { ...stateScale(state), enabled: state.rainInKey } } }));
+      toggle(more, 'rain-grid', 'Rain on the grid (close drops land on a beat)', () => !!r().grid?.enabled, (v) => (r().grid = { ...r().grid!, enabled: v }), ch);
+      slider(more, { id: 'rain-bpm', label: 'Grid tempo', min: 30, max: 200, step: 1, get: () => r().grid!.bpm, set: (v) => (r().grid = { ...r().grid!, bpm: v }), fmt: (v) => `${Math.round(v)} BPM` }, ch);
     }
 
     if (id === 'wind') {
@@ -290,8 +384,8 @@ function buildStrips(): void {
       slider(main, { id: 'wind-amount', label: 'Strength', min: 0, max: 1, step: 0.01, get: () => x().amount!, set: (v) => (x().amount = v), fmt: (v) => (v < 0.1 ? 'still' : v < 0.3 ? 'light air' : v < 0.55 ? 'breeze' : v < 0.8 ? 'windy' : 'gale') }, ch);
       slider(main, { id: 'wind-gust', label: 'Gustiness', min: 0, max: 1, step: 0.01, get: () => x().gustiness!, set: (v) => (x().gustiness = v), fmt: pct }, ch);
       slider(main, { id: 'wind-rustle', label: 'Leaves', min: 0, max: 1, step: 0.01, get: () => x().rustle!, set: (v) => (x().rustle = v), fmt: pct }, ch);
-      slider(moreBody, { id: 'wind-whistle', label: 'Whistle', min: 0, max: 1, step: 0.01, get: () => x().whistle!, set: (v) => (x().whistle = v), fmt: pct }, ch);
-      slider(moreBody, { id: 'wind-tone', label: 'Tone', min: -1, max: 1, step: 0.01, get: () => x().tone!, set: (v) => (x().tone = v), fmt: (v) => (Math.abs(v) < 0.02 ? 'natural' : v < 0 ? 'darker' : 'brighter') }, ch);
+      slider(more, { id: 'wind-whistle', label: 'Whistle', min: 0, max: 1, step: 0.01, get: () => x().whistle!, set: (v) => (x().whistle = v), fmt: pct }, ch);
+      slider(more, { id: 'wind-tone', label: 'Tone', min: -1, max: 1, step: 0.01, get: () => x().tone!, set: (v) => (x().tone = v), fmt: (v) => (Math.abs(v) < 0.02 ? 'natural' : v < 0 ? 'darker' : 'brighter') }, ch);
     }
 
     if (id === 'chimes') {
@@ -300,27 +394,11 @@ function buildStrips(): void {
       slider(main, { id: 'chime-tubes', label: 'Tubes', min: 3, max: 8, step: 1, get: () => c().tubes!, set: (v) => (c().tubes = v), fmt: (v) => String(Math.round(v)) }, ch);
       slider(main, { id: 'chime-sustain', label: 'Ring', min: 0.3, max: 4, step: 0.01, get: () => c().sustain!, set: (v) => (c().sustain = v), fmt: times }, ch);
       slider(main, { id: 'chime-sens', label: 'Sensitivity', min: 0, max: 1, step: 0.01, get: () => 1 - c().threshold!, set: (v) => (c().threshold = 1 - v), fmt: pct }, ch);
-      slider(moreBody, { id: 'chime-activity', label: 'Clapper energy', min: 0.2, max: 4, step: 0.01, get: () => c().activity!, set: (v) => (c().activity = v), fmt: times }, ch);
-      slider(moreBody, { id: 'chime-bright', label: 'Material', min: 0, max: 1, step: 0.01, get: () => c().brightness!, set: (v) => (c().brightness = v), fmt: (v) => (v < 0.3 ? 'wood-like' : v < 0.7 ? 'bronze' : 'aluminium') }, ch);
-      slider(moreBody, { id: 'chime-pitch', label: 'Register', min: 150, max: 1600, log: true, get: () => c().lowestHz!, set: (v) => (c().lowestHz = v), fmt: (v) => `from ${Math.round(v)} Hz` }, ch);
+      slider(more, { id: 'chime-activity', label: 'Clapper energy', min: 0.2, max: 4, step: 0.01, get: () => c().activity!, set: (v) => (c().activity = v), fmt: times }, ch);
+      slider(more, { id: 'chime-bright', label: 'Material', min: 0, max: 1, step: 0.01, get: () => c().brightness!, set: (v) => (c().brightness = v), fmt: (v) => (v < 0.3 ? 'wood-like' : v < 0.7 ? 'bronze' : 'aluminium') }, ch);
+      slider(more, { id: 'chime-pitch', label: 'Register', min: 150, max: 1600, log: true, get: () => c().lowestHz!, set: (v) => (c().lowestHz = v), fmt: (v) => `from ${Math.round(v)} Hz` }, ch);
     }
-
-    if (id === 'music') {
-      const ch = () => send({ music: w().music });
-      const m = () => w().music;
-      slider(main, { id: 'music-pad', label: 'Pad', min: 0, max: 2, step: 0.01, get: () => m().padLevel!, set: (v) => (m().padLevel = v), fmt: times }, ch);
-      slider(main, { id: 'music-keys', label: 'Keys', min: 0, max: 2, step: 0.01, get: () => m().keysLevel!, set: (v) => (m().keysLevel = v), fmt: times }, ch);
-      slider(main, { id: 'music-density', label: 'Notes', min: 0, max: 40, step: 0.5, get: () => m().density!, set: (v) => (m().density = v), fmt: (v) => `${v.toFixed(1)} / min` }, ch);
-      slider(moreBody, { id: 'music-bright', label: 'Pad brightness', min: 0, max: 1, step: 0.01, get: () => m().brightness!, set: (v) => (m().brightness = v), fmt: pct }, ch);
-      slider(moreBody, { id: 'music-chords', label: 'Chord change', min: 8, max: 120, step: 1, get: () => m().chordSeconds!, set: (v) => (m().chordSeconds = v), fmt: (v) => `~${Math.round(v)} s` }, ch);
-      slider(moreBody, { id: 'music-detune', label: 'Detune', min: 0, max: 60, step: 0.5, get: () => m().detune!, set: (v) => (m().detune = v), fmt: (v) => `${v.toFixed(1)} cents${v > 30 ? ' (seasick)' : ''}` }, ch);
-      slider(moreBody, { id: 'music-ratio', label: 'Keys timbre', min: 0.5, max: 7, step: 0.01, get: () => m().keysRatio!, set: (v) => (m().keysRatio = v), fmt: (v) => `FM ${v.toFixed(2)} · ${Math.abs(v - Math.round(v)) < 0.03 ? 'harmonic' : 'clangy'}` }, ch);
-      slider(moreBody, { id: 'music-octave', label: 'Keys register', min: 1, max: 4, step: 1, get: () => m().keysOctave!, set: (v) => (m().keysOctave = v), fmt: (v) => `+${Math.round(v)} oct` }, ch);
-    }
-
-    slider(moreBody, { id: `${id}-send`, label: 'Reverb send', min: 0, max: 1, step: 0.01, get: () => w().mix[id].send, set: (v) => (w().mix[id].send = v), fmt: pct }, mixChange);
-    card.append(main, more);
-    root.append(card);
+    slider(more, { id: `${id}-send`, label: 'Reverb send', min: 0, max: 1, step: 0.01, get: () => w().mix[id].send, set: (v) => (w().mix[id].send = v), fmt: pct }, mixChange(id));
   }
 
   currentLayer = null;
@@ -333,6 +411,14 @@ function buildStrips(): void {
   slider(space, { id: 'rev-size', label: 'Space size', min: 0.5, max: 2, step: 0.01, get: () => w().reverb.size!, set: (v) => (w().reverb.size = v), fmt: times }, ch);
 }
 
+function blendWord(v: number): string {
+  if (v < 0.05) return 'ambience only';
+  if (v < 0.4) return 'nature forward';
+  if (v <= 0.6) return 'balanced';
+  if (v < 0.95) return 'music forward';
+  return 'music only';
+}
+
 function togglePower(id: LayerId): void {
   w().mix[id].on = !w().mix[id].on;
   send({ mix: { [id]: { on: w().mix[id].on } } });
@@ -343,13 +429,12 @@ function buildScenes(): void {
   const scenes = $<HTMLSelectElement>('scene-pick');
   SCENES.forEach((scene, i) => scenes.add(new Option(scene.label, String(i))));
   scenes.addEventListener('change', () => applyScene(Number(scenes.value)));
-  const sel = $<HTMLSelectElement>('scale');
-  for (const [k, s] of Object.entries(SCALES)) sel.add(new Option(s.label, k));
-  sel.addEventListener('change', () => {
-    state.scaleKey = sel.value as ScaleKey;
-    send({ scale: SCALES[state.scaleKey], rain: { scale: { ...SCALES[state.scaleKey], enabled: state.rainInKey } } });
-    updateTubes();
-  });
+  const root = $<HTMLSelectElement>('root');
+  ROOT_NAMES.forEach((n, i) => root.add(new Option(n, String(i))));
+  root.addEventListener('change', () => { key().root = Number(root.value); sendScale(); syncAll(); });
+  const fam = $<HTMLSelectElement>('family');
+  for (const [k, label] of Object.entries(FAMILIES)) fam.add(new Option(label, k));
+  fam.addEventListener('change', () => { key().family = fam.value as ScaleFamily; sendScale(); syncAll(); });
 }
 
 function applyScene(i: number): void {
@@ -363,13 +448,14 @@ function applyScene(i: number): void {
 
 function syncAll(): void {
   syncers.forEach((s) => s());
-  $<HTMLSelectElement>('scale').value = state.scaleKey;
+  $<HTMLSelectElement>('root').value = String(key().root);
+  $<HTMLSelectElement>('family').value = key().family;
   $<HTMLSelectElement>('scene-pick').value = String(activeScene);
   pushWorld();
 }
 
 function updateTubes(): void {
-  const c = new ChimeSynth(44100, 'probe', { ...state.world.chimes, scale: SCALES[state.scaleKey] });
+  const c = new ChimeSynth(44100, 'probe', { ...state.world.chimes, scale: stateScale(state) });
   view.setTubes(c.tubeFrequencies);
 }
 
@@ -427,62 +513,66 @@ try {
 
 // ------------------------------------------------------------------ dials
 
-/** The dials that float around the object, per layer. Everything else lives in Advanced. */
-const DIALS: Record<LayerId, string[]> = {
-  music: ['music-level', 'music-pad', 'music-keys', 'music-density'],
-  chimes: ['chimes-level', 'chime-tubes', 'chime-sustain', 'chime-sens'],
-  rain: ['rain-level', 'rain-rate', 'rain-size', 'rain-near'],
-  wind: ['wind-level', 'wind-amount', 'wind-gust', 'wind-rustle'],
-};
-const clusters: { layer: LayerId; el: HTMLElement }[] = [];
+/** Dial clusters floating in the scene. Music clusters sit around the object; ambience below it. */
+const CLUSTERS: { id: string; title: string; layer: LayerId; hue: number; power?: LayerId; small?: boolean; dials: string[]; labels?: Record<string, string> }[] = [
+  { id: 'mood', title: 'Mood', layer: 'music', hue: 318, power: 'music', dials: ['mood-light', 'mood-purity', 'mood-warmth', 'mood-space'] },
+  { id: 'move', title: 'Movement', layer: 'music', hue: 285, dials: ['move-motion', 'move-breath', 'move-rhythm', 'move-tempo', 'move-beat'] },
+  { id: 'inst', title: 'Instruments', layer: 'music', hue: 340, small: true, dials: ['voice-drone', 'voice-pad', 'voice-bowls', 'voice-keys', 'voice-plucks', 'voice-choir'] },
+  { id: 'amb', title: 'Ambience', layer: 'rain', hue: 172, dials: ['bus-blend', 'rain-rate', 'wind-amount', 'chimes-level'], labels: { 'wind-amount': 'Wind', 'chimes-level': 'Chimes' } },
+];
+const clusters: { id: string; el: HTMLElement }[] = [];
 
 function buildDials(): void {
   const root = $('dials');
-  for (const layer of ['music', 'chimes', 'rain', 'wind'] as LayerId[]) {
+  for (const cl of CLUSTERS) {
     const el = document.createElement('section');
-    el.className = 'cluster';
-    el.dataset.layer = layer;
-    el.style.setProperty('--hue', String(LAYER_HUE[layer]));
+    el.className = `cluster${cl.small ? ' small' : ''}`;
+    el.dataset.cluster = cl.id;
+    el.style.setProperty('--hue', String(cl.hue));
     el.setAttribute('role', 'group');
-    el.setAttribute('aria-labelledby', `cl-${layer}`);
+    el.setAttribute('aria-labelledby', `cl-${cl.id}`);
     const head = document.createElement('header');
     const h = document.createElement('h2');
-    h.id = `cl-${layer}`;
-    h.textContent = LAYER_INFO[layer].title;
-    const power = document.createElement('button');
-    power.className = 'cpower';
-    power.id = `con-${layer}`;
-    power.setAttribute('aria-label', `${LAYER_INFO[layer].title} sound`);
-    power.addEventListener('click', () => togglePower(layer));
-    addSync(`on-${layer}`, () => {
-      const on = w().mix[layer].on;
-      power.setAttribute('aria-pressed', String(on));
-      power.textContent = on ? 'On' : 'Off';
-      el.classList.toggle('off', !on);
-    });
+    h.id = `cl-${cl.id}`;
+    h.textContent = cl.title;
     const meterEl = document.createElement('div');
     meterEl.className = 'cmeter';
     meterEl.setAttribute('aria-hidden', 'true');
-    meterEl.innerHTML = `<span id="cmeter-${layer}"></span>`;
-    head.append(h, meterEl, power);
+    meterEl.innerHTML = cl.power ? `<span id="cmeter-${cl.power}"></span>` : '<span></span>';
+    head.append(h, meterEl);
+    if (cl.power) {
+      const layer = cl.power;
+      const power = document.createElement('button');
+      power.className = 'cpower';
+      power.id = `con-${layer}`;
+      power.setAttribute('aria-label', `${LAYER_INFO[layer].title} on or off`);
+      power.addEventListener('click', () => togglePower(layer));
+      addSync(`on-${layer}`, () => {
+        const on = w().mix[layer].on;
+        power.setAttribute('aria-pressed', String(on));
+        power.textContent = on ? 'On' : 'Off';
+        el.classList.toggle('off', !on);
+      });
+      head.append(power);
+    }
     const row = document.createElement('div');
     row.className = 'dial-row';
-    for (const id of DIALS[layer]) {
+    for (const id of cl.dials) {
       const entry = specs.get(id);
       if (!entry) continue;
-      const sync = dial(row, entry.spec, () => {
+      const sync = dial(row, { ...entry.spec, label: cl.labels?.[id] ?? entry.spec.label }, () => {
         entry.onChange();
         changed(id);
       });
       addSync(id, sync);
     }
     el.append(head, row);
-    el.addEventListener('pointerenter', () => view3d?.setFocus(layer));
+    el.addEventListener('pointerenter', () => view3d?.setFocus(cl.layer));
     el.addEventListener('pointerleave', () => { if (!el.contains(document.activeElement)) view3d?.setFocus(null); });
-    el.addEventListener('focusin', () => view3d?.setFocus(layer));
+    el.addEventListener('focusin', () => view3d?.setFocus(cl.layer));
     el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget as Node)) view3d?.setFocus(null); });
     root.append(el);
-    clusters.push({ layer, el });
+    clusters.push({ id: cl.id, el });
   }
 }
 
@@ -498,8 +588,8 @@ function placeDials(): void {
   const top = $('top').getBoundingClientRect().bottom + 12;
   const W = window.innerWidth;
   const H = window.innerHeight;
-  for (const { layer, el } of clusters) {
-    const a = view3d.anchor(layer);
+  for (const { id, el } of clusters) {
+    const a = view3d.anchor(id);
     const w = el.offsetWidth;
     const h = el.offsetHeight;
     const x = Math.min(W - 16 - w, Math.max(16, a.x - w / 2));

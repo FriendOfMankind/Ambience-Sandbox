@@ -4,8 +4,9 @@
  *
  *   music  → the object. Each chord picks a shape family and the palette (pitch class → hue);
  *            notes light nodes that send rings across the skin; a strange attractor is its core.
- *   chimes → rods hanging around the object; a strike lights the rod and rings a cymatic
- *            (Chladni-style) pattern across the skin, decaying with the tube.
+ *   bowls  → a strike rings a cymatic (Chladni-style) pattern across the object's skin,
+ *            decaying with the bowl; the beat's kick makes the object throb, slowly.
+ *   chimes → (ambience) rods hanging along the far shore that glow when struck.
  *   rain   → ripples on the lake where and when drops land, streaks, a glossier landscape.
  *   wind   → curl-noise haze and aurora; gusts bend the object and warp the contour hills.
  *
@@ -48,12 +49,12 @@ const PROBE_H = 36;
 
 const SURFACE_KIND: Record<SurfaceId, number> = { water: 0, leaves: 1, grass: 1, stone: 2, tin: 2, glass: 2, bells: 3 };
 
-/** Where each layer's dials float, in world space. */
-const ANCHORS: Record<LayerId, THREE.Vector3> = {
-  music: new THREE.Vector3(-3.3, 3.7, 0.4),
-  chimes: new THREE.Vector3(3.3, 3.7, 0.4),
-  rain: new THREE.Vector3(-3.5, 0.9, 2.2),
-  wind: new THREE.Vector3(3.5, 0.9, 2.2),
+/** Where each dial cluster floats, in world space: music around the object, ambience low. */
+const ANCHORS: Record<string, THREE.Vector3> = {
+  mood: new THREE.Vector3(-3.4, 3.8, 0.4),
+  move: new THREE.Vector3(3.4, 3.8, 0.4),
+  inst: new THREE.Vector3(-3.6, 0.8, 2.3),
+  amb: new THREE.Vector3(3.6, 0.8, 2.3),
 };
 
 /** Camera framing per focused layer: [position, look-at]. */
@@ -122,6 +123,7 @@ export class SceneView3D {
   private readonly attrMats: THREE.ShaderMaterial[] = [];
   private readonly rods: { pivot: THREE.Group; mirror: THREE.Group; u: { uHue: THREE.IUniform; uE: THREE.IUniform } }[] = [];
   private readonly rodShared: Record<string, THREE.IUniform>;
+  private chimeGroups: THREE.Group[] = [];
   private readonly objectGroup = new THREE.Group();
   private readonly mirrorGroup = new THREE.Group();
 
@@ -131,8 +133,14 @@ export class SceneView3D {
   private features: WorldFeatures | null = null;
   private world: VisualWorld = { rainRate: 5, windAmount: 0.3, sustain: 1, chordSeconds: 35 };
   private tubeHz: number[] = [];
-  private tubeKick = new Float32Array(TUBES_MAX);
-  private tubeE = new Float32Array(TUBES_MAX);
+  /** Bowl strikes → cymatic patterns on the shell, one slot per pitch class group. */
+  private bowlKick = new Float32Array(TUBES_MAX);
+  private bowlE = new Float32Array(TUBES_MAX);
+  /** Chime strikes → rods on the shore. */
+  private chimeKick = new Float32Array(TUBES_MAX);
+  private chimeE = new Float32Array(TUBES_MAX);
+  private beatKick = 0;
+  private beatE = 0;
   private nodeBirth = new Float32Array(NODES).fill(-99);
   private nodeIdx = 0;
   private ripIdx = 0;
@@ -217,7 +225,7 @@ export class SceneView3D {
       uNodeInfo: { value: v4s(NODES).map(() => new THREE.Vector4()) },
       uTubeE: { value: new Array(TUBES_MAX).fill(0) },
       uTubeHue: { value: new Array(TUBES_MAX).fill(0) },
-      uTubes: { value: 6 },
+      uTubes: { value: TUBES_MAX },
     };
     this.lookU = {
       uHue: { value: this.hue },
@@ -284,10 +292,14 @@ export class SceneView3D {
       return named('core', pts);
     });
 
-    // Chime rods on a halo above the object.
+    // Chime rods hang along the far shore (ambience), with their reflections.
     this.rodShared = { uGain: this.lookU.uGain, uEdit: { value: 0 } };
-    const rodGeo = new THREE.CylinderGeometry(0.013, 0.013, 1, 6, 1, true);
+    const rodGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 6, 1, true);
     rodGeo.translate(0, -0.5, 0);
+    const chimeGroup = new THREE.Group();
+    const chimeMirror = new THREE.Group();
+    chimeMirror.scale.y = -1;
+    chimeMirror.renderOrder = 1;
     for (let i = 0; i < TUBES_MAX; i++) {
       const u = { uHue: { value: 0 }, uE: { value: 0 } };
       const make = (dim: number) => {
@@ -297,18 +309,11 @@ export class SceneView3D {
       };
       const pivot = make(1);
       const mirror = make(0.32);
-      this.objectGroup.add(pivot);
-      this.mirrorGroup.add(mirror);
+      chimeGroup.add(pivot);
+      chimeMirror.add(mirror);
       this.rods.push({ pivot, mirror, u });
     }
-    const halo = (dim: number) => {
-      const m = new THREE.Mesh(new THREE.TorusGeometry(1.55, 0.005, 6, 160), mat(S.ROD_VERT, S.ROD_FRAG, { uHue: { value: LAYER_HUE.chimes / 360 }, uE: { value: 0 }, ...this.rodShared, uDim: { value: dim * 0.6 } }));
-      m.rotation.x = Math.PI / 2;
-      m.position.y = 1.3;
-      return m;
-    };
-    this.objectGroup.add(halo(1));
-    this.mirrorGroup.add(halo(0.32));
+    this.chimeGroups = [chimeGroup, chimeMirror];
 
     // ---------------------------------------------------------------- the place
     this.skyMat = new THREE.ShaderMaterial({
@@ -330,6 +335,7 @@ export class SceneView3D {
     terrain.name = 'terrain';
     this.bg.add(terrain);
     this.bg.add(this.mirrorGroup);
+    this.bg.add(...this.chimeGroups);
 
     this.lakeMat = new THREE.ShaderMaterial({
       vertexShader: S.LAKE_VERT, fragmentShader: S.LAKE_FRAG, transparent: true, depthWrite: false,
@@ -411,19 +417,17 @@ export class SceneView3D {
   setTubes(freqs: number[]): void {
     this.tubeHz = freqs.slice(0, TUBES_MAX);
     const n = this.tubeHz.length;
-    this.shapeU.uTubes.value = n;
-    const hues = this.shapeU.uTubeHue.value as number[];
     this.rods.forEach((r, i) => {
       const on = i < n;
       r.pivot.visible = r.mirror.visible = on;
       if (!on) return;
       const hz = this.tubeHz[i];
-      hues[i] = pitchHue(hz) / 360;
-      r.u.uHue.value = hues[i];
-      const a = (i / n) * Math.PI * 2 + 0.3;
-      const len = Math.min(1.25, Math.max(0.45, 0.9 * Math.sqrt(523 / hz)));
+      r.u.uHue.value = pitchHue(hz) / 360;
+      // An arc along the far shore, behind the object.
+      const a = Math.PI * (1.18 + 0.64 * (n > 1 ? i / (n - 1) : 0.5));
+      const len = Math.min(2.6, Math.max(1.1, 1.8 * Math.sqrt(523 / hz)));
       for (const g of [r.pivot, r.mirror]) {
-        g.position.set(Math.cos(a) * 1.55, 1.3, Math.sin(a) * 1.55);
+        g.position.set(Math.cos(a) * 7.5, 4.4, Math.sin(a) * 7.5);
         g.children[0].scale.y = len;
       }
     });
@@ -496,8 +500,8 @@ export class SceneView3D {
   }
 
   /** Screen position (CSS px) of a layer's dial anchor, and a depth-based scale. */
-  anchor(layer: LayerId): { x: number; y: number; depth: number } {
-    const p = ANCHORS[layer].clone().project(this.camera);
+  anchor(cluster: string): { x: number; y: number; depth: number } {
+    const p = (ANCHORS[cluster] ?? ANCHORS.mood).clone().project(this.camera);
     return { x: (p.x * 0.5 + 0.5) * this.width, y: (-p.y * 0.5 + 0.5) * this.height, depth: p.z };
   }
 
@@ -508,10 +512,12 @@ export class SceneView3D {
       this.queue.push({ time: t, fn: () => this.addRipple(e.pan, e.diameterMm, e.surface, e.bubbleHz, e.frame) });
     }
     for (const e of events.chimes) {
-      this.queue.push({ time: timeOf(e.frame), fn: () => { if (e.tube < TUBES_MAX) this.tubeKick[e.tube] = Math.max(this.tubeKick[e.tube], e.velocity); } });
+      this.queue.push({ time: timeOf(e.frame), fn: () => { if (e.tube < TUBES_MAX) this.chimeKick[e.tube] = Math.max(this.chimeKick[e.tube], e.velocity); } });
     }
     for (const e of events.music) {
       if (e.kind === 'chord') this.queue.push({ time: timeOf(e.frame), fn: () => this.onChord(e.hz, e.step) });
+      else if (e.kind === 'beat') { if (e.step === 0) this.queue.push({ time: timeOf(e.frame), fn: () => (this.beatKick = Math.max(this.beatKick, e.velocity)) }); }
+      else if (e.voice === 'bowl') this.queue.push({ time: timeOf(e.frame), fn: () => this.onBowl(e.hz, e.velocity) });
       else this.queue.push({ time: timeOf(e.frame), fn: () => this.onNote(e.hz, e.velocity) });
     }
     // Hidden tabs stop the frame loop; don't let the backlog grow without bound.
@@ -544,6 +550,14 @@ export class SceneView3D {
     (this.shapeU.uPoseB.value as THREE.Vector4).copy(next);
     this.morph = 0;
     this.morphDur = Math.min(8, Math.max(3, this.world.chordSeconds * 0.2)) * (this.reduced ? 1.6 : 1);
+  }
+
+  /** A bowl rings a cymatic pattern; its pitch class picks the pattern and colour. */
+  private onBowl(hz: number, velocity: number): void {
+    const pc = Math.round((((12 * Math.log2(hz / 261.63)) % 12) + 12) % 12);
+    const slot = pc % TUBES_MAX;
+    (this.shapeU.uTubeHue.value as number[])[slot] = pitchHue(hz) / 360;
+    this.bowlKick[slot] = Math.max(this.bowlKick[slot], Math.min(1, velocity * 1.2));
   }
 
   private onNote(hz: number, velocity: number): void {
@@ -669,27 +683,36 @@ export class SceneView3D {
     const nodes = su.uNodes.value as THREE.Vector4[];
     for (let i = 0; i < NODES; i++) nodes[i].w = now - this.nodeBirth[i] < 0 ? 99 : now - this.nodeBirth[i];
 
-    // Chime energy: attack limited to ~150 ms, release no faster than 0.6 s. Strikes can't strobe.
-    const tau = Math.max(0.6, 0.9 * this.world.sustain);
+    // Event light: attacks limited to ~150 ms, releases no faster than 0.6 s, so hits can't strobe.
+    const slew = (kick: Float32Array, e: Float32Array, tau: number) => {
+      let total = 0;
+      for (let i = 0; i < TUBES_MAX; i++) {
+        kick[i] *= Math.exp(-dt / 0.12);
+        const v = e[i];
+        e[i] = kick[i] > v ? v + Math.min(kick[i] - v, dt * 6) : Math.max(kick[i], v * Math.exp(-dt / tau));
+        total += e[i];
+      }
+      return total > 1.6 ? 1.6 / total : 1;
+    };
+    // Bowls (music) → cymatics on the shell.
+    const bowlCap = slew(this.bowlKick, this.bowlE, 1.4);
     const tubeE = su.uTubeE.value as number[];
-    let total = 0;
+    const preview = 0.2 * this.edit.music;
+    for (let i = 0; i < TUBES_MAX; i++) tubeE[i] = Math.max(this.bowlE[i] * bowlCap, preview * (i === 2 ? 1 : 0));
+    // Chimes (ambience) → rods on the shore.
+    const chimeCap = slew(this.chimeKick, this.chimeE, Math.max(0.6, 0.9 * this.world.sustain));
     for (let i = 0; i < TUBES_MAX; i++) {
-      this.tubeKick[i] *= Math.exp(-dt / 0.12);
-      const e = this.tubeE[i];
-      this.tubeE[i] = this.tubeKick[i] > e ? e + Math.min(this.tubeKick[i] - e, dt * 6) : Math.max(this.tubeKick[i], e * Math.exp(-dt / tau));
-      total += this.tubeE[i];
-    }
-    const cap = total > 1.6 ? 1.6 / total : 1;
-    const preview = 0.2 * this.edit.chimes;
-    for (let i = 0; i < TUBES_MAX; i++) {
-      tubeE[i] = Math.max(this.tubeE[i] * cap, preview);
-      this.rods[i].u.uE.value = this.tubeE[i] * cap;
       const rod = this.rods[i];
+      rod.u.uE.value = this.chimeE[i] * chimeCap;
       const sway = rm ? 0 : Math.sin(now * (1.1 + i * 0.13) + i * 1.7) * 0.07 * this.wind;
       const lean = Math.max(-0.3, Math.min(0.3, this.gust * 0.12 * this.wind)) * motion;
       for (const g of [rod.pivot, rod.mirror]) { g.rotation.z = lean + sway; g.rotation.x = sway * 0.6; }
     }
     this.rodShared.uEdit.value = this.edit.chimes;
+    // Beat: the kick swells the object a little; slow release so a pulse reads as breathing.
+    this.beatKick *= Math.exp(-dt / 0.1);
+    this.beatE = this.beatKick > this.beatE ? this.beatE + Math.min(this.beatKick - this.beatE, dt * 5) : this.beatE * Math.exp(-dt / 0.45);
+    su.uBreath.value += 0.022 * this.beatE * (rm ? 0.4 : 1);
 
     // Flash guard: turn event light down quickly if any region nears the limit, recover slowly.
     const pressure = this.flash.pressure();
