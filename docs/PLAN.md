@@ -220,11 +220,65 @@ The loop problem has three causes: a recognisable *moment* (a distinctive splash
 
 **D. Procedural helpers (continuous, parametric, loop-free)**
 - **Wind:** filtered pink/brown noise. Gust amplitude and filter frequency follow a bounded random walk (an Ornstein-Uhlenbeck process), plus resonant band-passes for "whistle through pines" [37].
-- **Rain texture:** a granular "drop" synth (short filtered noise bursts, randomly timed) layered *over* the recorded rain. It adds detail density that tracks `rain` smoothly.
+- **Rain:** superseded by the full procedural RainEngine in F below (D8).
 - **Colour noise:** white, pink, brown or "green" (speech-masking) as a utility layer, because the ADHD evidence suggests some users genuinely want it [18].
 
 **E. Slow spectral life**
 - Every bed gets a slow random-walk on a gentle tilt EQ (±1.5 dB) and gain (±2 dB), à la Soft Murmur's Meander [3]. It's subtle enough not to notice and enough to stop things sounding static.
+
+**F. Procedural rain engine ("RainEngine")**
+
+*Added after the decision to synthesise rain ourselves (D8).* Rain is the best candidate in the whole app for full synthesis. It's physically well understood, it's made of countless tiny independent events (so it can't loop), and synthesis exposes controls no recording can: drop size, surface material, distance, and physically impossible rain.
+
+**Evidence** that this is feasible:
+- Van den Doel's work models liquid sounds as the sum of individual **bubble** vibrations, using Minnaert's 1933 resonance model, and synthesises streams, rivers and **rain** stochastically in real time [49][50].
+- Later work models a raindrop's sound with two mechanisms, **the initial impact and the pulsation of entrained bubbles**, with material-dependent impacts [51].
+- Farnell builds rain from Gaussian-distributed drop pulses exciting noise bands [37].
+- **Honest counterweight:** synthesised effects are often *perceived as synthetic*, which is why the technique hasn't taken over games [52]. Realism is not guaranteed. It's what the M0 bake-off (below) tests.
+
+**Model: three distance tiers, one physical parameter set**
+
+```mermaid
+flowchart LR
+  P[Rain params<br/>rate mm/h, size bias, wind,<br/>surface mix, distance] --> DSD[Drop-size sampler<br/>Marshall–Palmer]
+  DSD --> NEAR[Near tier: individual drops<br/>main-thread scheduler, ≤ ~40/s<br/>impact + bubble, per-drop pan]
+  DSD --> MID[Mid tier: grain cloud<br/>AudioWorklet, 100s–1000s/s<br/>simplified impact/bubble grains]
+  P --> FAR[Far tier: statistical wash<br/>shaped noise, spectrum from rate]
+  NEAR --> EB[EventBus → lake ripples, splashes on screen]
+  NEAR --> MIX[Rain bus]
+  MID --> MIX
+  FAR --> MIX
+```
+
+- **Drop sizes** come from the Marshall–Palmer distribution, N(D) = N₀·e^(−ΛD) with N₀ = 8000 m⁻³mm⁻¹ and Λ = 4.1·R^(−0.21) mm⁻¹, where R is rain rate in mm/h [53]. Heavier rain automatically brings more large drops. Real meteorology becomes a musical parameter.
+- **Each near drop = impact + optional bubble.**
+  - *Impact:* a very short noise burst (0.5–5 ms) through a surface filter. Water is dull and low; leaves are papery and bright; stone is a sharp click; metal and glass use 2–4 modal resonators (ringing partials).
+  - *Bubble (water surfaces only, probabilistic):* a damped sine at roughly the Minnaert frequency, f₀ ≈ 3.26/r Hz for bubble radius r in metres (≈ 3.3 kHz at 1 mm), with the small **upward pitch glide** van den Doel uses [49]. That glide is the "plink" that makes water sound like water.
+- **Mid tier:** the same recipe, simplified (fewer resonators, random pan, distance low-pass), run as a grain cloud inside an AudioWorklet so thousands of drops per second cost little. Seeded PRNG inside the worklet, so it's reproducible.
+- **Far tier:** at a distance, thousands of drops blur into noise. Shaped noise whose level and spectral tilt follow rain rate, plus a low rumble for downpours.
+- **Wind** couples in: gusts modulate drop density (rain arrives in sheets) and pan drift.
+- **Space:** everything goes through the world's reverb send, with more send for farther tiers.
+
+**Why this is the best example of the app's core idea:** the **near drops are world events.** Each one that lands on the lake spawns a ripple *at the same moment and position* as its plink. You literally see the drops you hear, and it costs nothing extra, because the renderer is listening to the EventBus anyway.
+
+**Sandbox controls** (Advanced → Nature → Rain):
+
+| Control | Realistic range | Beyond realistic (the fun part) |
+|---|---|---|
+| Rate (mm/h) | 0.1 drizzle → 50 downpour | 500: a wall of water |
+| Drop size bias | Marshall–Palmer | all giant drops (slow fat plonks), all mist |
+| Surface mix | water / leaves / grass / stone / metal / glass | "bells" (long resonances), "wood blocks", custom modal partials |
+| Bubble pitch | physical | **quantised to the music's pitch set.** The rain plays in key, and its tuning follows the tuning system, microtones included |
+| Timing | Poisson (random) | clustered, Euclidean-gridded to the pulse, slowed so each drop is an event |
+| Distance mix | near / mid / far balance | only near: rain as a sparse melodic instrument |
+| Gravity/time | 1× | stretched: drops ring for seconds, a frozen-time shimmer |
+
+The "rain in key" and "rain on the grid" settings blur nature and music on purpose, which is exactly the sandbox territory you described.
+
+**Implementation notes:**
+- Write the DSP as **pure functions** (drop → sample buffer, or per-sample voice state) so it's unit-testable in Node and also usable offline to render short previews.
+- Keep the worklet in TypeScript for the MVP. Profile in M2; move to WASM (Rust or AssemblyScript) only if the grain cloud costs more than ~5% CPU at heavy rain.
+- **Recordings stay useful even if never shipped:** your rain takes are the reference for tuning the synth's spectra and densities (compare a long-term average spectrum side by side), and they're the fallback "realism" layer if the synth loses the bake-off.
 
 **Test for "is it loopy?"** Blind listening. Five listeners, 30 minutes each, press a key whenever something sounds repeated. Pass: fewer than 1 press per 10 minutes on average. This runs in M0 on rain, and in M2 on everything.
 
@@ -802,7 +856,7 @@ Bonus material for Rainy Window later: rain on glass (mic taped near an inside w
 ### Must-have (MVP)
 
 **Tarn world, fully polished:**
-- Nature: lake, stream, pine wind (recorded + procedural gusts), rain L/M/H + drop synth, 3 bird pools, crickets, splashes, heron, distant thunder, colour-noise utility layer.
+- Nature: lake, stream, pine wind (recorded + procedural gusts), **procedural RainEngine** (near/mid/far tiers, 6 surfaces, rain-in-key and gridded timing), plus your recorded rain as an optional realism blend, 3 bird pools, crickets, splashes, heron, distant thunder, colour-noise utility layer.
 - Music: Pad, Keys (sampled felt piano), Pluck (phasing), Fragment, Texture (granular from the world's recordings), Pulse (basic Euclidean).
 - Visual: all 8 layers of §5.2, day/night, weather, event-coupled ripples/lightning/heron, colour grading.
 
@@ -860,7 +914,7 @@ flowchart LR
 
 | Spike | What | Acceptance |
 |---|---|---|
-| **S1 Loop-free rain bed** | BedPlayer prototype on a real rain recording (free placeholder first, swapped for your own recordings as they arrive), with segment + shuffle + crossfade | Blind test: 3+ listeners, 20 min each, fewer than 1 "repeat!" press per 10 min. No clicks at crossfades |
+| **S1 Rain bake-off** | Three candidates for 2 min each at light/medium/heavy: **A** recorded bed (BedPlayer with segment + shuffle + crossfade, on your recordings or free placeholders), **B** fully procedural RainEngine, **C** hybrid (recorded or procedural far wash + procedural near drops). Rain on water and on leaves | Blind test with 5 listeners: rate realism (1–5) and "would you study to this" (1–5), plus the loop-press test on A. **B ships as the default if its realism is within 0.5 of A.** Otherwise C is the default and B becomes a "Synthetic" surface option. Either way the sandbox controls ship |
 | **S2 Desktop audio endurance** *(was "mobile reality"; downgraded by D1)* | Chrome, Safari, Firefox on desktop: 3-hour run in a background tab, laptop sleep/wake, Bluetooth headphones connect/disconnect mid-session (the output device changes, and `outputLatency` jumps), memory with 6 chunked layers. Plus one 10-minute smoke test on an iPhone, just to record what breaks | Audio survives all of it or recovers with a fade within 2 s. A written note on mobile status, which doesn't block anything |
 | **S3 Safety chain** | Limiter worklet + NaN guard + governor, fed a torture test (feedback delay at 1.2, a bit-crusher making DC, a sudden +30 dB step) | Output never exceeds −1 dBFS; no sustained silence after NaN injection; step increases slewed |
 | **S4 Tarn look test** | Sky + mountains + lake reflection + rain ripples shader, graded | 60 fps at 1440p on a laptop integrated GPU (e.g. Intel Iris Xe / Apple M1 base); 3 people unprompted say it looks "nice/pretty" rather than "like a screensaver" (yes, subjective; that's the point) |
@@ -874,7 +928,7 @@ See the **M1 handoff spec** in §12.
 
 ### M2: Nature system (L)
 
-- BedPlayer (production), IntensityLayer, EventPool with behaviours (rate modulation, call-response, bursts, distance model, arrival delay), ProceduralWind, DropSynth, NoiseColor.
+- BedPlayer (production), IntensityLayer, EventPool with behaviours (rate modulation, call-response, bursts, distance model, arrival delay), ProceduralWind, **RainEngine** (all three tiers, surfaces, sandbox controls, EventBus drops), NoiseColor.
 - Asset pipeline (`tools/assets`) + the full Tarn nature pack.
 - **Acceptance:**
   - 2-hour soak with no memory growth beyond budget, no clicks, and no audible loops (blind test as in S1 on 3 layers).
@@ -952,7 +1006,8 @@ Decided 2026-09-28:
 |---|---|---|---|
 | D1 | **Primary target** | **Desktop web PWA** | Mobile is best-effort. M0-S2 becomes a desktop endurance test. Performance targets are set for laptop integrated GPUs. There's room for richer visuals (e.g. more fog layers, a higher-quality reflection pass) |
 | D2 | **MVP hero world** | **Tarn** (default taken), with a pivot to Rainy Window if S4 fails | — |
-| D3 | **Sound sourcing** | **Rain: self-recorded** (see §8.1.1). **Everything else: free recordings** (Freesound et al.) | Rain is the hero layer and the biggest loop risk, so owning it is the right place to spend effort. Other layers depend on curation; budget listening time. Licences are tagged per asset |
+| D3 | **Sound sourcing** | **Rain: synthesised** (D8), with self-recorded rain (§8.1.1) as the tuning reference and fallback. **Everything else: free recordings** (Freesound et al.) | Other layers depend on curation; budget listening time. Licences are tagged per asset |
+| D8 | **Rain source** | **Procedural RainEngine** (§3.2 F) as the default, decided by the M0 bake-off against recorded and hybrid rain | Synthesis turns rain into an instrument (rain in key, on the grid, impossible surfaces) and makes drop-to-ripple coupling exact. Risk: it may sound synthetic, which the bake-off catches in week 1 |
 | D4 | **Commercial intent** | **Non-commercial** | CC-BY-NC and non-commercial model licences (e.g. Stable Audio Open) become usable. Credits screen is mandatory. Going commercial later means replacing NC assets (the audit script lists them) |
 | D5 | **Sharing scope** | **Link only** (default taken) | No backend in MVP |
 | D6 | **UI framework** | **Svelte 5** (no preference expressed, so the default stands) | — |
@@ -1050,5 +1105,10 @@ Still unknown: **weekly hours available.** That's needed only to turn §10's rel
 46. Stable Audio Open 1.0 licence (Hugging Face). https://huggingface.co/stabilityai/stable-audio-open-1.0/blob/main/LICENSE.md
 47. Tone.js on npm. https://www.npmjs.com/package/tone
 48. Freesound FAQ (licences and attribution). https://freesound.org/help/faq/
+49. van den Doel (2005), "Physically based models for liquid sounds", *ACM Transactions on Applied Perception*. https://dl.acm.org/doi/10.1145/1101530.1101554
+50. UBC LCI Forum, van den Doel talk on liquid sound synthesis. https://www.cs.ubc.ca/labs/lci/lci-forum/03/vandendoel-040312.html
+51. "Physically-based statistical simulation of rain sound", *ACM Transactions on Graphics* (SIGGRAPH 2019). https://dl.acm.org/doi/10.1145/3306346.3323045
+52. "Perceptual Evaluation of Synthesised Sound Effects". https://www.academia.edu/68956121/Perceptual_Evaluation_of_Synthesised_Sound_Effects
+53. Raindrop size distribution (Marshall–Palmer), Wikipedia. https://en.wikipedia.org/wiki/Raindrop_size_distribution
 
 *Caveats on sources:* items 29–33 are developer write-ups and bug trackers, not vendor documentation. Treat those behaviours as hypotheses to confirm in M0-S2/S3. Where I could only access abstracts or summaries (14, 18), I've reported headline findings only.
