@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build:artifact": "node scripts/build-artifact.mjs"
+    "build:artifact": "node scripts/build-artifact.mjs",
+    "build:lab": "node scripts/build-artifact.mjs lab"
   },
   "devDependencies": {
     "@types/node": "^26.6.3",

@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         sandbox: resolve(import.meta.dirname, 'spikes/sandbox/index.html'),
+        lab: resolve(import.meta.dirname, 'spikes/lab/index.html'),
       },
     },
   },

@@ -31,9 +31,15 @@ Desktop-first; non-commercial; rain fully synthetic (no recordings); layers are 
 - There's no persistence, no save/share link and no Focus mode or timer yet (PLAN M6/M7).
 - The visual is a 2D placeholder with a pitch → hue mapping.
 
+## Tarn Lab (added after the first version of this handoff)
+
+`spikes/lab/`: a listening test bench with 30 isolated tests (start here: tin, glass, leaves), ratings, problem tags, level/tone/density nudges, tweakable sliders, and a pasteable **Report**. Build with `npm run build:lab`. Tests are defined in `spikes/lab/tests.ts`; `tests/lab.test.ts` renders each one headlessly.
+
+Objective levels measured while building it (20 s renders, RMS / peak before the limiter): the spread is large, and several tests are far too hot. Gale wind peaks at +15 dBFS, tin at +6, wind whistle at +5, bright chimes at +2.5, and scenes 2 (Storm), 3 and 6 at +8, +3 and +3.5. Drizzle sits at −44 dB RMS and Wind chimes (bronze) at −38 dB. Nothing has been level-calibrated across layers, so treat these as the first things to fix once listening feedback is in.
+
 ## Suggested next steps
 
-1. Get listening feedback on the new tin, glass and leaves, and on wind, chimes and music, then tune.
+1. Get listening feedback through the Lab on the new tin, glass and leaves, and on wind, chimes and music, then tune.
 2. Design pass for the 3D synaesthetic object and floating dials: per-layer visual grammar, Focus-mode calming, reduced motion, flash safety, and keyboard/screen-reader access for the dials. Prototype in Three.js/WebGL, driven by `WorldSynth` events and features.
 3. Scene morphing (parameter interpolation) and loudness-matched scenes.
 4. Save/share: URL-encoded world + seed (PLAN §7.8).

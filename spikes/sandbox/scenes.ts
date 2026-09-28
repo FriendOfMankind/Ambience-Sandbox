@@ -3,8 +3,13 @@ import type { MusicParams } from '../../src/audio/music/MusicSynth';
 import type { RainParams } from '../../src/audio/nature/rain/RainSynth';
 import type { ReverbParams } from '../../src/audio/dsp/Reverb';
 import type { WindParams } from '../../src/audio/nature/wind/WindSynth';
-import type { LayerId, LayerMix } from '../../src/audio/world/WorldSynth';
-import type { ScaleKey } from '../../src/audio/music/scales';
+import { DEFAULT_WORLD_PARAMS, mergeWorld, type LayerId, type LayerMix, type WorldParams, type WorldParamsPatch } from '../../src/audio/world/WorldSynth';
+import { DEFAULT_RAIN_PARAMS } from '../../src/audio/nature/rain/RainSynth';
+import { DEFAULT_WIND_PARAMS } from '../../src/audio/nature/wind/WindSynth';
+import { DEFAULT_CHIME_PARAMS } from '../../src/audio/nature/chimes/ChimeSynth';
+import { DEFAULT_MUSIC_PARAMS } from '../../src/audio/music/MusicSynth';
+import { DEFAULT_REVERB_PARAMS } from '../../src/audio/dsp/Reverb';
+import { SCALES, type ScaleKey } from '../../src/audio/music/scales';
 import type { SurfaceId } from '../../src/audio/nature/rain/surfaces';
 
 export interface Scene {
@@ -17,6 +22,44 @@ export interface Scene {
   chimes?: Partial<ChimeParams>;
   music?: Partial<MusicParams>;
   reverb?: Partial<ReverbParams>;
+}
+
+/** Everything the UI edits for one scene: the full parameter set for every layer. */
+export interface SceneState {
+  scaleKey: ScaleKey;
+  rainInKey: boolean;
+  world: WorldParams;
+}
+
+/** Scene → full parameter state. Layers a scene doesn't mention are on, at their defaults. */
+export function sceneState(scene: Scene): SceneState {
+  const { scale: _r, ...rainDefaults } = DEFAULT_RAIN_PARAMS;
+  const { scale: _c, ...chimeDefaults } = DEFAULT_CHIME_PARAMS;
+  const { scale: _m, ...musicDefaults } = DEFAULT_MUSIC_PARAMS;
+  const world = mergeWorld(DEFAULT_WORLD_PARAMS, {
+    mix: scene.mix,
+    scale: SCALES[scene.scale],
+    rain: { ...rainDefaults, ...scene.rain },
+    wind: { ...DEFAULT_WIND_PARAMS, ...scene.wind },
+    chimes: { ...chimeDefaults, ...scene.chimes },
+    music: { ...musicDefaults, ...scene.music },
+    reverb: { ...DEFAULT_REVERB_PARAMS, ...scene.reverb },
+  });
+  return { scaleKey: scene.scale, rainInKey: !!scene.rainInKey, world };
+}
+
+/** Full state → the patch the world worklet takes. */
+export function stateToPatch(st: SceneState): WorldParamsPatch {
+  const w = st.world;
+  return {
+    mix: w.mix,
+    scale: SCALES[st.scaleKey],
+    rain: { ...w.rain, scale: { ...SCALES[st.scaleKey], enabled: st.rainInKey } },
+    wind: w.wind,
+    chimes: w.chimes,
+    music: w.music,
+    reverb: w.reverb,
+  };
 }
 
 export const surfaces = (m: Partial<Record<SurfaceId, number>>): Record<SurfaceId, number> => ({

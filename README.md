@@ -15,6 +15,10 @@ Open the URL Vite prints and go to **Tarn Sandbox** (`/spikes/sandbox/`). Use de
 
 Other scripts: `npm test` (unit tests), `npm run typecheck`, `npm run build`, `npm run build:artifact` (the sandbox as one self-contained HTML file, for publishing as a claude.ai Artifact).
 
+## Tarn Lab (listening tests)
+
+`/spikes/lab/` (or `npm run build:lab` for a single-file page). One sound at a time, isolated, with what to listen for, ratings, problem tags, "too quiet / too loud" nudges, sliders for the parameters worth tuning, and a live level meter. Feedback is saved in the browser; **Report** produces a text summary (ratings, notes, slider values you settled on, measured levels) to paste back so the synth constants can be tuned from it. The test catalogue is `spikes/lab/tests.ts`.
+
 ## Tarn Sandbox
 
 Four layers, all synthesised live and sharing one world state:

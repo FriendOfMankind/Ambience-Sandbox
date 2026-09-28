@@ -2,63 +2,24 @@ import worldWorkletUrl from '../../src/audio/worklets/world.worklet.ts?worker&ur
 import limiterWorkletUrl from '../../src/audio/worklets/limiter.worklet.ts?worker&url';
 import type { WorldOutMessage } from '../../src/audio/worklets/world.worklet';
 import type { LimiterOutMessage } from '../../src/audio/worklets/limiter.worklet';
-import { DEFAULT_WORLD_PARAMS, LAYERS, mergeWorld, type LayerId, type WorldParams, type WorldParamsPatch } from '../../src/audio/world/WorldSynth';
-import { DEFAULT_RAIN_PARAMS } from '../../src/audio/nature/rain/RainSynth';
-import { DEFAULT_WIND_PARAMS } from '../../src/audio/nature/wind/WindSynth';
-import { ChimeSynth, DEFAULT_CHIME_PARAMS } from '../../src/audio/nature/chimes/ChimeSynth';
-import { DEFAULT_MUSIC_PARAMS } from '../../src/audio/music/MusicSynth';
-import { DEFAULT_REVERB_PARAMS } from '../../src/audio/dsp/Reverb';
+import { LAYERS, type LayerId, type WorldParamsPatch } from '../../src/audio/world/WorldSynth';
+import { ChimeSynth } from '../../src/audio/nature/chimes/ChimeSynth';
 import { SCALES, type ScaleKey } from '../../src/audio/music/scales';
 import { SURFACE_IDS, SURFACES } from '../../src/audio/nature/rain/surfaces';
 import { dbToGain, gainToDb } from '../../src/audio/dsp/loudness';
-import { SCENES, type Scene } from './scenes';
+import { SCENES, sceneState, stateToPatch, type SceneState } from './scenes';
 import { SceneView } from './view';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 // ------------------------------------------------------------------ state
 
-/** Full parameter state for every layer: the UI edits this and sends patches. */
-interface State {
-  scaleKey: ScaleKey;
-  rainInKey: boolean;
-  world: WorldParams;
-}
-
-function fullState(scene: Scene): State {
-  const { scale: _r, ...rainDefaults } = DEFAULT_RAIN_PARAMS;
-  const { scale: _c, ...chimeDefaults } = DEFAULT_CHIME_PARAMS;
-  const { scale: _m, ...musicDefaults } = DEFAULT_MUSIC_PARAMS;
-  const world = mergeWorld(DEFAULT_WORLD_PARAMS, {
-    mix: scene.mix,
-    scale: SCALES[scene.scale],
-    rain: { ...rainDefaults, ...scene.rain },
-    wind: { ...DEFAULT_WIND_PARAMS, ...scene.wind },
-    chimes: { ...chimeDefaults, ...scene.chimes },
-    music: { ...musicDefaults, ...scene.music },
-    reverb: { ...DEFAULT_REVERB_PARAMS, ...scene.reverb },
-  });
-  // Scenes may leave a layer's mix unspecified: default it to "on" at its default level.
-  return { scaleKey: scene.scale, rainInKey: !!scene.rainInKey, world };
-}
-
-let state = fullState(SCENES[0]);
+let state: SceneState = sceneState(SCENES[0]);
 let seed = 'tarn';
 let playing = false;
 let activeScene = 0;
 
-function statePatch(): WorldParamsPatch {
-  const w = state.world;
-  return {
-    mix: w.mix,
-    scale: SCALES[state.scaleKey],
-    rain: { ...w.rain, scale: { ...SCALES[state.scaleKey], enabled: state.rainInKey } },
-    wind: w.wind,
-    chimes: w.chimes,
-    music: w.music,
-    reverb: w.reverb,
-  };
-}
+const statePatch = () => stateToPatch(state);
 
 // ------------------------------------------------------------------ audio
 
@@ -389,7 +350,7 @@ function buildScenes(): void {
 
 function applyScene(i: number): void {
   activeScene = i;
-  state = fullState(SCENES[i]);
+  state = sceneState(SCENES[i]);
   // Layers the scene doesn't mention fall back to their defaults, which are "on".
   send(statePatch());
   syncAll();

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tarn Lab</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="top">
+        <div>
+          <h1>Tarn Lab</h1>
+          <p class="sub">A listening test bench. One sound at a time, isolated. Listen, rate, nudge the sliders until it's right, then send the report back.</p>
+        </div>
+        <div class="top-actions">
+          <label class="inline">Listening on
+            <select id="device">
+              <option value="">(pick one)</option>
+              <option>Headphones</option>
+              <option>Earbuds</option>
+              <option>Laptop speakers</option>
+              <option>Desktop speakers</option>
+              <option>Phone speaker</option>
+            </select>
+          </label>
+          <span id="progress" class="progress"></span>
+          <button id="report-open" class="primary">Report</button>
+        </div>
+      </header>
+      <p id="error" class="error" role="alert" hidden></p>
+
+      <div class="lab">
+        <nav id="nav" aria-label="Tests"></nav>
+        <section id="panel" class="panel" aria-live="polite"></section>
+      </div>
+    </main>
+
+    <dialog id="report">
+      <form method="dialog" class="report-box">
+        <h2>Feedback report</h2>
+        <p class="sub">Copy this and paste it into the chat. Only tests with feedback are included.</p>
+        <textarea id="report-text" readonly rows="18"></textarea>
+        <div class="row">
+          <button type="button" id="report-copy" class="primary">Copy</button>
+          <button type="button" id="report-download">Download .md</button>
+          <button type="button" id="report-clear" class="danger">Clear all feedback</button>
+          <span id="report-msg" class="muted" role="status"></span>
+          <button value="close" class="right">Close</button>
+        </div>
+      </form>
+    </dialog>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
