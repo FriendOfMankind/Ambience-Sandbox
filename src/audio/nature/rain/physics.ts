@@ -5,7 +5,7 @@
  * N0 = 8000 m⁻³mm⁻¹, Λ = 4.1·R^−0.21 mm⁻¹ (R = rain rate in mm/h).
  * Terminal velocity uses the Atlas et al. (1973) fit, v = 9.65 − 10.3·exp(−0.6D) m/s.
  * These are real meteorology; everything downstream of them (loudness per drop,
- * audible areas) is tuned by ear.
+ * audible areas) is an initial guess awaiting listening tests.
  */
 
 import type { Rng } from '../../../core/rng';

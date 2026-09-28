@@ -1,5 +1,5 @@
 /**
- * Surface models for drop impacts. Values are tuned by ear, not measured.
+ * Surface models for drop impacts. Values are initial guesses from acoustics intuition, not measured or yet tuned by listening.
  *
  * - impact*: a short noise burst through a band-pass (the "tick" of the hit)
  * - modes: resonances excited by the impact (a sill ringing, glass ticking)

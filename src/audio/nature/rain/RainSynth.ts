@@ -106,7 +106,7 @@ export function cloneRainParams(p: RainParams): RainParams {
   };
 }
 
-/** Areas (m²) whose drops make up each tier. Tuned by ear. */
+/** Areas (m²) whose drops make up each tier. Initial guesses; tune by listening. */
 const NEAR_AREA = 0.003;
 const MID_AREA = 0.15;
 const MAX_NEAR_RATE = 250;
@@ -416,7 +416,7 @@ export class RainSynth {
     // Bubble
     this.vBubOn[v] = hasBubble ? 1 : 0;
     if (hasBubble) {
-      // Decay tuned by ear: small (high) bubbles ring briefly, larger ones a little longer.
+      // Decay is an initial guess (not from the paper): small (high) bubbles ring briefly, larger ones a little longer.
       const tau = 0.006 * Math.sqrt(3000 / bubbleHz) * stretch;
       this.vBubStartIn[v] = startIn + Math.round((bubbleDelayMs / 1000) * fs);
       this.vBubAmp[v] = amp * 0.8 * stretchNorm;
