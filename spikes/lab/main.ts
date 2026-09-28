@@ -557,15 +557,6 @@ async function copyReport(): Promise<void> {
   }
 }
 
-function downloadReport(): void {
-  const blob = new Blob([$<HTMLTextAreaElement>('report-text').value], { type: 'text/markdown' });
-  const a = el('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `tarn-lab-feedback-${new Date().toISOString().slice(0, 10)}.md`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
 let clearArmed = false;
 function clearAll(): void {
   const btn = $('report-clear');
@@ -599,7 +590,6 @@ function init(): void {
   });
   $('report-open').addEventListener('click', openReport);
   $('report-copy').addEventListener('click', () => void copyReport());
-  $('report-download').addEventListener('click', downloadReport);
   $('report-clear').addEventListener('click', clearAll);
   window.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement;
