@@ -43,7 +43,7 @@ describe('RainSynth', () => {
   it('stays finite and bounded at sandbox extremes', () => {
     const extremes: Partial<RainParams>[] = [
       { rate: 500, sizeBias: 2, nearDensity: 4, midDensity: 4 },
-      { rate: 50, stretch: 20, surfaceMix: { water: 0, leaves: 0, grass: 0, stone: 0, metal: 1, glass: 1 } },
+      { rate: 50, stretch: 20, surfaceMix: { water: 0, leaves: 0, grass: 0, stone: 0, tin: 1, glass: 1, bells: 1 } },
       { rate: 0.1, sizeBias: -2 },
       { rate: 20, bubblePitch: 2, bubbleGlide: 2 },
       { rate: 20, bubblePitch: -3 },
@@ -85,7 +85,7 @@ describe('RainSynth', () => {
     const scale = { enabled: true, rootHz: 146.83, cents: [0, 300, 500, 700, 1000], periodCents: 1200 };
     const res = render('key', 10, {
       rate: 10,
-      surfaceMix: { water: 1, leaves: 0, grass: 0, stone: 0, metal: 0, glass: 0 },
+      surfaceMix: { water: 1, leaves: 0, grass: 0, stone: 0, tin: 0, glass: 0, bells: 0 },
       scale,
     });
     const bubbles = res.events.filter((e) => e.bubbleHz > 0);
@@ -114,5 +114,19 @@ describe('RainSynth in a worklet-like scope', () => {
     } finally {
       g.structuredClone = saved;
     }
+  });
+});
+
+describe('RainSynth wind coupling', () => {
+  it('follows an external gust: strong gusts bring more drops', () => {
+    const count = (g: number) => {
+      const s = new RainSynth(FS, 'gust', { rate: 10, wind: 1 });
+      s.setExternalGust(g);
+      const l = new Float32Array(128);
+      const r = new Float32Array(128);
+      for (let i = 0; i < (10 * FS) / 128; i++) s.process(l, r, 128);
+      return s.drainEvents().length;
+    };
+    expect(count(1.5)).toBeGreaterThan(count(-1.5) * 2);
   });
 });

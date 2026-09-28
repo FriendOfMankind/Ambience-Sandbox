@@ -24,16 +24,11 @@ import {
   sampleDropDiameter,
   snapToScale,
 } from './physics';
+import type { ScaleSnap } from '../../music/scales';
 import { ResonatorBank } from './ResonatorBank';
 import { SURFACE_IDS, SURFACES, type SurfaceId } from './surfaces';
 
-export interface ScaleSnap {
-  enabled: boolean;
-  rootHz: number;
-  /** Scale degrees in cents within one period. */
-  cents: number[];
-  periodCents: number;
-}
+export type { ScaleSnap } from '../../music/scales';
 
 export interface GridSnap {
   enabled: boolean;
@@ -80,7 +75,7 @@ export interface RainEvent {
 export const DEFAULT_RAIN_PARAMS: RainParams = {
   rate: 5,
   sizeBias: 0,
-  surfaceMix: { water: 0.6, leaves: 0.3, grass: 0.1, stone: 0.05, metal: 0, glass: 0 },
+  surfaceMix: { water: 0.6, leaves: 0.3, grass: 0.1, stone: 0.05, tin: 0, glass: 0, bells: 0 },
   nearLevel: 1,
   midLevel: 1,
   farLevel: 1,
@@ -141,6 +136,8 @@ export class RainSynth {
   private nextMidIn = 0;
   private gust = 0;
   private gustMul = 1;
+  /** When set, gusts come from the shared world wind instead of this synth's own random walk. */
+  private externalGust: number | null = null;
   private events: RainEvent[] = [];
   /** Shared ringing objects for long-ringing surfaces, per tier. */
   private readonly banks: Partial<Record<SurfaceId, { near: ResonatorBank; mid: ResonatorBank }>> = {};
@@ -243,6 +240,11 @@ export class RainSynth {
     }
   }
 
+  /** Couple to a shared wind: pass the world's gust value (≈ unit-variance), or null to decouple. */
+  setExternalGust(g: number | null): void {
+    this.externalGust = g;
+  }
+
   drainEvents(): RainEvent[] {
     const e = this.events;
     this.events = [];
@@ -277,7 +279,9 @@ export class RainSynth {
     const dt = frames / this.sampleRate;
     const theta = 0.35;
     const sigma = 0.7;
-    this.gust += -theta * this.gust * dt + sigma * Math.sqrt(dt) * this.rngGust.gaussian();
+    const noise = this.rngGust.gaussian(); // always drawn, so the stream stays aligned either way
+    if (this.externalGust !== null) this.gust = this.externalGust;
+    else this.gust += -theta * this.gust * dt + sigma * Math.sqrt(dt) * noise;
     this.gustMul = Math.exp(this.p.wind * 0.9 * this.gust);
   }
 

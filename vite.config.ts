@@ -9,7 +9,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
-        rainBakeoff: resolve(import.meta.dirname, 'spikes/rain-bakeoff/index.html'),
+        sandbox: resolve(import.meta.dirname, 'spikes/sandbox/index.html'),
       },
     },
   },

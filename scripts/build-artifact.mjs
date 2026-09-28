@@ -3,14 +3,15 @@
  * Artifacts only allow inline scripts, so the AudioWorklet modules are bundled to strings and
  * loaded from blob: URLs, and the page script and CSS are inlined.
  *
- *   node scripts/build-artifact.mjs  ->  dist-artifact/rain-bakeoff.html
+ *   node scripts/build-artifact.mjs [page]  ->  dist-artifact/<page>.html   (page = folder in spikes/, default sandbox)
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { build } from 'vite';
 
 const root = resolve(import.meta.dirname, '..');
-const spike = resolve(root, 'spikes/rain-bakeoff');
+const page = process.argv[2] ?? 'sandbox';
+const spike = resolve(root, 'spikes', page);
 
 async function bundle(entry, format, name) {
   const out = await build({
@@ -45,7 +46,7 @@ function workletPlugin() {
   };
 }
 
-for (const w of ['rain', 'limiter']) {
+for (const w of ['world', 'rain', 'limiter']) {
   const path = resolve(root, `src/audio/worklets/${w}.worklet.ts`);
   worklets[path] = await bundle(path, 'es');
 }
@@ -55,12 +56,11 @@ const html = readFileSync(resolve(spike, 'index.html'), 'utf8');
 const title = html.match(/<title>[^<]*<\/title>/)[0];
 const body = html
   .slice(html.indexOf('<body>') + 6, html.indexOf('</body>'))
-  .replace(/<script type="module"[^>]*><\/script>/, '')
-  .replace('Throwaway UI; the engine underneath is real.', 'Your recording stays in your browser; nothing is uploaded.');
+  .replace(/<script type="module"[^>]*><\/script>/, '');
 
 // A closing script tag inside the bundle would end the inline script early.
 const safeJs = js.replace(/<\/script/gi, '<\\/script');
 const out = `${title}\n<style>\n${css}\n</style>\n${body.trim()}\n<script>\n${safeJs}\n</script>\n`;
 mkdirSync(resolve(root, 'dist-artifact'), { recursive: true });
-writeFileSync(resolve(root, 'dist-artifact/rain-bakeoff.html'), out);
-console.log(`dist-artifact/rain-bakeoff.html ${(out.length / 1024).toFixed(1)} KB`);
+writeFileSync(resolve(root, `dist-artifact/${page}.html`), out);
+console.log(`dist-artifact/${page}.html ${(out.length / 1024).toFixed(1)} KB`);

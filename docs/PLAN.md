@@ -1024,6 +1024,10 @@ Decided 2026-09-28:
 | D6 | **UI framework** | **Svelte 5** (no preference expressed, so the default stands) | — |
 | D7 | **Developer profile** | Very comfortable with TS/audio/graphics | The next chat should scaffold and build, not explain. Milestone sizes in §10 assume an experienced dev |
 
+| D8b | **Rain recordings** | **None.** Rain is fully synthesised; the recorded/hybrid bake-off is dropped | Realism rests on synth tuning by ear. BedPlayer stays for later recorded layers |
+| D9 | **Layer structure** | **Rain, Wind, Wind chimes, Music** as separate layers, sharing one world state (wind drives rain and chimes; one key drives everything pitched) | Built as `WorldSynth` in one AudioWorklet (about 9% of a core in Node) |
+| D10 | **Visual direction (in progress)** | A trippy, **synaesthetic 3D object** that changes shape and colour with the sounds, with **floating dials** around it that open each layer's controls | Supersedes §5's "living matte painting" as the hero visual. Keep the plan's rule of per-sound mappings rather than one mixed FFT, so each layer has its own visual language; pitch → hue is already in place. Needs its own design pass: object grammar, mappings, motion limits (reduced-motion, flash safety) and how dials work with keyboard and screen readers |
+
 Still unknown: **weekly hours available.** That's needed only to turn §10's relative sizes into dates.
 
 **Things to watch because of D3 and D4:**

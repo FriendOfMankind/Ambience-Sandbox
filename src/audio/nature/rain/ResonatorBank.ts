@@ -10,7 +10,7 @@
 import type { Rng } from '../../../core/rng';
 import { snapToScale } from './physics';
 import type { Surface } from './surfaces';
-import type { ScaleSnap } from './RainSynth';
+import type { ScaleSnap } from '../../music/scales';
 
 interface Pending {
   frame: number;

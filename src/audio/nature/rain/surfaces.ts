@@ -33,7 +33,7 @@ export interface Surface {
   bankSpreadOct?: number;
 }
 
-export const SURFACE_IDS = ['water', 'leaves', 'grass', 'stone', 'metal', 'glass'] as const;
+export const SURFACE_IDS = ['water', 'leaves', 'grass', 'stone', 'tin', 'glass', 'bells'] as const;
 export type SurfaceId = (typeof SURFACE_IDS)[number];
 
 export const SURFACES: Record<SurfaceId, Surface> = {
@@ -84,13 +84,48 @@ export const SURFACES: Record<SurfaceId, Surface> = {
     modeJitter: 0.2,
     bubbleProb: 0,
   },
-  metal: {
-    id: 'metal',
-    label: 'Metal sill',
+  // Rain on a tin/steel roof: a dense, bright clatter. Each drop hits a different spot of a big
+  // panel, so the ring is short, inharmonic and different every time (large random detune per mode).
+  tin: {
+    id: 'tin',
+    label: 'Tin roof',
+    impactHz: 5000,
+    impactQ: 0.9,
+    impactDecayMs: 0.6,
+    impactGain: 1.2,
+    modes: [
+      { f: 1800, tauMs: 22, amp: 0.45 },
+      { f: 2870, tauMs: 16, amp: 0.35 },
+      { f: 3850, tauMs: 12, amp: 0.28 },
+      { f: 4770, tauMs: 9, amp: 0.22 },
+    ],
+    modeJitter: 0.3,
+    bubbleProb: 0,
+  },
+  // Rain on a window: mostly bright ticks with a very short glassy ring.
+  glass: {
+    id: 'glass',
+    label: 'Window glass',
+    impactHz: 7000,
+    impactQ: 1.4,
+    impactDecayMs: 0.35,
+    impactGain: 0.8,
+    modes: [
+      { f: 4200, tauMs: 4, amp: 0.25 },
+      { f: 6900, tauMs: 3, amp: 0.15 },
+    ],
+    modeJitter: 0.3,
+    bubbleProb: 0,
+  },
+  // Not realistic on purpose: every drop strikes one of a fixed set of tuned metal bars.
+  // Sounds like fast wind chimes / a rain-played glockenspiel. Follows "rain in key".
+  bells: {
+    id: 'bells',
+    label: 'Bells (unreal)',
     impactHz: 4000,
     impactQ: 1.2,
     impactDecayMs: 0.5,
-    impactGain: 0.8,
+    impactGain: 0.5,
     modes: [
       { f: 523, tauMs: 160, amp: 0.5 },
       { f: 1371, tauMs: 110, amp: 0.4 },
@@ -100,21 +135,5 @@ export const SURFACES: Record<SurfaceId, Surface> = {
     modeJitter: 0.03,
     bubbleProb: 0,
     bankSpreadOct: 0.4,
-  },
-  glass: {
-    id: 'glass',
-    label: 'Glass',
-    impactHz: 6000,
-    impactQ: 1.0,
-    impactDecayMs: 0.3,
-    impactGain: 0.7,
-    modes: [
-      { f: 2210, tauMs: 35, amp: 0.35 },
-      { f: 5430, tauMs: 22, amp: 0.25 },
-      { f: 8690, tauMs: 14, amp: 0.15 },
-    ],
-    modeJitter: 0.08,
-    bubbleProb: 0,
-    bankSpreadOct: 0.3,
   },
 };
