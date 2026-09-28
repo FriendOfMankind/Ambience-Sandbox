@@ -71,3 +71,4 @@ table { border-collapse: collapse; margin-top: 12px; }
 td, th { border-bottom: 1px solid var(--line); padding: 6px 10px; text-align: left; }
 kbd { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
 @media (max-width: 600px) { canvas#lake { height: 180px; } }
+textarea#blind-json { width: 100%; margin-top: 10px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.4 ui-monospace, monospace; }

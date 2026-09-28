@@ -13,7 +13,7 @@ npm run dev
 
 Then open the URL Vite prints and go to **Rain bake-off** (`/spikes/rain-bakeoff/`). Use desktop Chrome, Firefox or Safari.
 
-Other scripts: `npm test` (unit tests), `npm run typecheck`, `npm run build`.
+Other scripts: `npm test` (unit tests), `npm run typecheck`, `npm run build`, `npm run build:artifact` (single-file page for publishing as a claude.ai Artifact).
 
 ## Rain bake-off
 
@@ -27,7 +27,7 @@ Compares three candidates for the rain layer:
 
 **Explore tab:** load your recording (file picker, or drag it onto the page), press Start, switch A/B/C (keys `1` `2` `3`), and play with every synth control. That includes the non-physical ones: rain in key, rain on a rhythmic grid, time stretch and giant drops. The lake shows a ripple for each near drop you hear.
 
-**Blind test tab:** X/Y/Z are A/B/C in random order, loudness-matched to −30 LUFS, with visuals hidden. Listen to each for 5+ minutes (ideally while reading), press `R` when you hear a repeat, and rate realism and "would I study to this". "Reveal and save" stores the result in the browser and applies the plan's rule: **synthetic becomes the default if its realism is within 0.5 of the recording.** "Download all results" exports JSON.
+**Blind test tab:** X/Y/Z are A/B/C in random order, loudness-matched to −30 LUFS, with visuals hidden. Listen to each for 5+ minutes (ideally while reading), press `R` when you hear a repeat, and rate realism and "would I study to this". "Reveal and save" stores the result in the browser and applies the plan's rule: **synthetic becomes the default if its realism is within 0.5 of the recording.** "Copy all results" copies the JSON so you can paste it to Claude.
 
 **About your recording:**
 - MP3 is fine; use 192 kbps or better. WAV is better if your recorder gives it.

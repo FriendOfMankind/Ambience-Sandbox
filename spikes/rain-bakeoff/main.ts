@@ -161,7 +161,13 @@ function setCandidate(c: Candidate): void {
 
 async function togglePlay(): Promise<void> {
   const btn = $<HTMLButtonElement>('play');
-  const e = await ensureEngine();
+  let e: Engine;
+  try {
+    e = await ensureEngine();
+  } catch (err) {
+    $('file-info').textContent = `Couldn't start the audio engine: ${(err as Error).message}. Try the local setup in the README.`;
+    return;
+  }
   const t = e.ctx.currentTime;
   if (!playing) {
     await e.ctx.resume();
@@ -593,13 +599,23 @@ function loadResults(): unknown[] {
   }
 }
 
+/**
+ * Copy all saved results as JSON. Copying (not downloading) works everywhere,
+ * including sandboxed frames that block downloads. The text is also shown for manual copy.
+ */
 function exportResults(): void {
-  const blob = new Blob([JSON.stringify(loadResults(), null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `rain-bakeoff-results-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  const json = JSON.stringify(loadResults(), null, 2);
+  const box = $<HTMLTextAreaElement>('blind-json');
+  box.value = json;
+  box.hidden = false;
+  const status = $('blind-status');
+  navigator.clipboard
+    ?.writeText(json)
+    .then(() => (status.textContent = 'Results copied to the clipboard. Paste them to Claude.'))
+    .catch(() => {
+      box.select();
+      status.textContent = 'Copy blocked here. The results are selected below; press Ctrl/Cmd+C.';
+    });
 }
 
 // ------------------------------------------------------------------ stats
