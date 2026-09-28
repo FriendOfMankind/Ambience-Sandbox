@@ -1,7 +1,7 @@
 /// <reference path="./worklet-globals.d.ts" />
 import { WorldSynth, type WorldEvents, type WorldFeatures, type WorldParamsPatch } from '../world/WorldSynth';
 
-export type WorldInMessage = { type: 'params'; patch: WorldParamsPatch };
+export type WorldInMessage = { type: 'params'; patch: WorldParamsPatch } | { type: 'stop' };
 export type WorldOutMessage = {
   type: 'tick';
   events: WorldEvents;
@@ -17,6 +17,8 @@ const POST_EVERY_BLOCKS = 6; // ~16 ms at 48 kHz
 class WorldProcessor extends AudioWorkletProcessor {
   private world: WorldSynth;
   private blocks = 0;
+  /** Disconnecting a node does not stop its processor; returning false from process() does. */
+  private alive = true;
 
   constructor(options: AudioWorkletNodeOptions) {
     super(options);
@@ -24,6 +26,7 @@ class WorldProcessor extends AudioWorkletProcessor {
     this.world = new WorldSynth(sampleRate, opts.seed ?? 'default', opts.patch);
     this.port.onmessage = (e: MessageEvent<WorldInMessage>) => {
       if (e.data.type === 'params') this.world.setParams(e.data.patch);
+      else if (e.data.type === 'stop') this.alive = false;
     };
   }
 
@@ -46,7 +49,7 @@ class WorldProcessor extends AudioWorkletProcessor {
       };
       this.port.postMessage(msg);
     }
-    return true;
+    return this.alive;
   }
 }
 

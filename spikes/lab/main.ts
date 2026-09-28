@@ -130,6 +130,9 @@ function fadeOut(v: Voice, t: number): void {
   v.gain.gain.setValueAtTime(v.gain.gain.value, t);
   v.gain.gain.linearRampToValueAtTime(0, t + 0.5);
   setTimeout(() => {
+    // Disconnecting alone leaves the synth rendering in the audio thread. Every switched-away
+    // test would keep burning CPU until the audio starved and crackled.
+    v.node.port.postMessage({ type: 'stop' });
     v.node.disconnect();
     v.gain.disconnect();
     v.node.port.close();

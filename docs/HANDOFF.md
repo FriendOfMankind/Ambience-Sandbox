@@ -37,6 +37,15 @@ Desktop-first; non-commercial; rain fully synthetic (no recordings); layers are 
 
 Objective levels measured while building it (20 s renders, RMS / peak before the limiter): the spread is large, and several tests are far too hot. Gale wind peaks at +15 dBFS, tin at +6, wind whistle at +5, bright chimes at +2.5, and scenes 2 (Storm), 3 and 6 at +8, +3 and +3.5. Drizzle sits at −44 dB RMS and Wind chimes (bronze) at −38 dB. Nothing has been level-calibrated across layers, so treat these as the first things to fix once listening feedback is in.
 
+## Lab feedback, round 1 (2026-09-28) and what was found
+
+19 of 30 tests were rated on desktop speakers. Findings, separating measured fact from listening opinion:
+
+- **Bug (fixed): disconnected synth nodes kept rendering.** `node.disconnect()` does not stop an AudioWorklet processor, so every test switched away from kept a full `WorldSynth` running in the audio thread. After ~20 switches that is enough load to cause dropouts, which sound like static on *everything*, including layers whose offline render is clean (music pad: 4–8 kHz at −97 dB; chimes: silent between strikes). Fix: `world.worklet` now handles `{type:'stop'}` by returning `false` from `process()`, and the Lab and the sandbox's re-seed post it before disconnecting. Verified in Chromium: after 9 node switches only one processor is still posting. **Any "static / hiss" tag on chimes, pad, or wind from before this fix is suspect and should be re-rated.**
+- **Real (measured, independent of the bug): the far-tier wash is surface-blind.** `renderFar` is pink noise through fixed filters, its level depends only on rain rate. At 6 mm/h it sits at about −35 dB RMS for every surface, while the actual drops on grass are ~28 dB below it (mid/near ≈ −63 dB), stone ~11 dB below, leaves ~5 dB below. So leaves, grass and stone tests are mostly the same generic hiss (spectra match to within 1 dB), which lines up with the "static / hiss, thin" tags. Tin's drops sit above the wash, and it wasn't flagged for the drops themselves.
+- **Listening opinions to act on:** rain on water is a little high-pitched with "wet rubber squeaks" (bubble pitch/glide; rain-in-key is "too high pitched" too). Wind leaves sound like cards shuffling / a guiro scraped along a frog's back (the flutter clicks are too regular and ticky). Gale is too loud and harsh (RMS −7 dB, limiter touching); whistle too loud; downpour too loud; wood and bright chimes too loud. Drizzle 5/5 and light breeze 5/5. Glass 4/5 and 5/5 pleasant.
+- Not yet heard: music keys / both / Lydian and all 8 scenes.
+
 ## Suggested next steps
 
 1. Get listening feedback through the Lab on the new tin, glass and leaves, and on wind, chimes and music, then tune.

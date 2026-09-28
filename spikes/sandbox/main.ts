@@ -122,7 +122,7 @@ async function reseed(): Promise<void> {
   inGain.gain.linearRampToValueAtTime(1, t + 3);
   next.connect(inGain).connect(master);
   engine.world = next;
-  setTimeout(() => { old.disconnect(); fade.disconnect(); old.port.close(); }, 3200);
+  setTimeout(() => { old.port.postMessage({ type: 'stop' }); old.disconnect(); fade.disconnect(); old.port.close(); }, 3200);
 }
 
 function showError(text: string): void {
