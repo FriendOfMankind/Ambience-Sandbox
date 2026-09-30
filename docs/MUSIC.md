@@ -69,7 +69,15 @@ Measured (30 s renders): everything plus all processors comes to 8.5% of one cor
 
 ## Vibes
 
-Deep rest, Temple, Morning light, Rain study (lo-fi), Night drift, Floating, Storm shelter, Strange weather, Near silence (ambience only). Defined in `spikes/sandbox/scenes.ts`.
+22 vibes in five groups (`spikes/sandbox/scenes.ts`). Each has a one-line description of what to listen for and what to try, and a suggested visual Trip.
+
+- **Calm:** Deep rest, Airport at dawn (after Eno), Plateaux (soft piano, after Budd), Temple, Morning light
+- **Moody:** Rain study (lo-fi), Tape-deck jazz, Cassette memories (after Basinski), Night drift, Storm shelter
+- **Playful:** Glass garden, Heartbeat, Arcade after hours, Frozen lake
+- **Strange:** Underwater cathedral, Floating, Deep space, Fever dream, Strange weather
+- **Ambience only:** Summer storm, Breeze and chimes, Near silence
+
+**Surprise me** rolls a random vibe with guard rails: 2–4 voices plus a pad or drone floor, the beat only in pulse mode (and not always), and processors usually moderate. `tests/music.test.ts` checks that 40 rolls all stay finite, bounded and in key.
 
 ## Tests
 

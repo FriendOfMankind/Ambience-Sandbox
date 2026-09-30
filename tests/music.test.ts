@@ -170,3 +170,25 @@ describe('MusicSynth ensemble', { timeout: 120_000 }, () => {
     for (const r of rows) expect(r.peakDb).toBeLessThan(3);
   });
 });
+
+describe('vibes', () => {
+  it('every random roll gives valid, bounded, in-key music', async () => {
+    const { randomVibe, sceneState, stateScale } = await import('../spikes/sandbox/scenes');
+    const { mulberry } = { mulberry: (a: number) => () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; } };
+    const rnd = mulberry(42);
+    for (let i = 0; i < 40; i++) {
+      const st = sceneState(randomVibe(rnd));
+      const scale = stateScale(st);
+      const m = new MusicSynth(FS, `v${i}`, { ...st.world.music, scale });
+      const l = new Float32Array(B), r = new Float32Array(B), sl = new Float32Array(B), sr = new Float32Array(B);
+      let peak = 0;
+      for (let b = 0; b < (4 * FS) / B; b++) {
+        m.process(l, r, sl, sr, B);
+        for (let n = 0; n < B; n++) peak = Math.max(peak, Math.abs(l[n]));
+      }
+      expect(Number.isFinite(peak)).toBe(true);
+      expect(peak).toBeLessThan(1.5);
+      for (const e of m.drainEvents()) if (e.kind === 'note') expect(snapToScale(e.hz, scale.rootHz, scale.cents)).toBeCloseTo(e.hz, 3);
+    }
+  }, 120_000);
+});

@@ -362,7 +362,7 @@ SCENES.forEach((scene, i) => {
     title: scene.label,
     status: 'unheard',
     layers: audible,
-    listenFor: SCENE_NOTES[i] ?? '',
+    listenFor: scene.blurb ?? SCENE_NOTES[i] ?? '',
     question: 'Is the balance between layers right? Say which one should move.',
     realLabel: 'Sounds coherent',
     scene,

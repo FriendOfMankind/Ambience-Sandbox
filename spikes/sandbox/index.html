@@ -21,9 +21,11 @@
         <button id="play" class="primary">▶ Play</button>
         <label class="inline">Volume <input id="volume" type="range" min="-40" max="0" step="0.5" value="-10" /> <output id="volume-out">−10.0 dB</output></label>
         <label class="inline">Vibe <select id="scene-pick"></select></label>
+        <button id="surprise" title="Roll a random vibe">Surprise me</button>
         <span class="inline keysel">Key <select id="root" aria-label="Root note"></select> <select id="family" aria-label="Scale family"></select></span>
         <span class="seed">Seed <code id="seed"></code> <button id="reseed" title="A different version of the same world">New seed</button></span>
       </div>
+      <p id="vibe-blurb" class="vibe-blurb" aria-live="polite"></p>
       <div class="look">
         <label class="inline trip" for="trip">Trip <input id="trip" type="range" min="0" max="1" step="0.01" value="0.6" /> <output id="trip-out" for="trip"></output></label>
         <button id="motion" aria-pressed="false">Motion: full</button>

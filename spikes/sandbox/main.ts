@@ -8,7 +8,7 @@ import { DEFAULT_KEY, FAMILIES, lightName, ROOT_NAMES, type ScaleFamily } from '
 import { DEFAULT_MUSIC_PARAMS, VOICING_ORDER } from '../../src/audio/music/MusicSynth';
 import { SURFACE_IDS, SURFACES } from '../../src/audio/nature/rain/surfaces';
 import { dbToGain, gainToDb } from '../../src/audio/dsp/loudness';
-import { purityDetune, SCENES, sceneState, spacePatch, stateScale, stateToPatch, type SceneState } from './scenes';
+import { purityDetune, randomVibe, SCENES, sceneState, spacePatch, stateScale, stateToPatch, type Scene, type SceneState } from './scenes';
 import { SceneView } from './view';
 import { SceneView3D } from './view3d';
 import { dial, fromInput, inputRange, toInput, type SliderSpec } from './dials';
@@ -20,7 +20,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 let state: SceneState = sceneState(SCENES[0]);
 let seed = 'tarn';
 let playing = false;
-let activeScene = 0;
+let activeScene: number | 'surprise' = 0;
 
 const statePatch = () => stateToPatch(state);
 
@@ -452,8 +452,26 @@ function togglePower(id: LayerId): void {
 
 function buildScenes(): void {
   const scenes = $<HTMLSelectElement>('scene-pick');
-  SCENES.forEach((scene, i) => scenes.add(new Option(scene.label, String(i))));
-  scenes.addEventListener('change', () => applyScene(Number(scenes.value)));
+  const groups = new Map<string, HTMLOptGroupElement>();
+  SCENES.forEach((scene, i) => {
+    const name = scene.group ?? 'More';
+    let g = groups.get(name);
+    if (!g) {
+      g = document.createElement('optgroup');
+      g.label = name;
+      groups.set(name, g);
+      scenes.append(g);
+    }
+    const o = new Option(scene.label, String(i));
+    if (scene.blurb) o.title = scene.blurb;
+    g.append(o);
+  });
+  // Shown only while a Surprise roll is playing.
+  const surprise = new Option('Surprise roll', 'surprise');
+  surprise.hidden = true;
+  scenes.prepend(surprise);
+  scenes.addEventListener('change', () => { if (scenes.value !== 'surprise') applyScene(Number(scenes.value)); });
+  $('surprise').addEventListener('click', () => loadVibe(randomVibe(), 'surprise'));
   const root = $<HTMLSelectElement>('root');
   ROOT_NAMES.forEach((n, i) => root.add(new Option(n, String(i))));
   root.addEventListener('change', () => { key().root = Number(root.value); sendScale(); syncAll(); });
@@ -463,8 +481,21 @@ function buildScenes(): void {
 }
 
 function applyScene(i: number): void {
-  activeScene = i;
-  state = sceneState(SCENES[i]);
+  loadVibe(SCENES[i], i);
+}
+
+/** Load a vibe: its full state, its suggested Trip, and its description. */
+function loadVibe(scene: Scene, id: number | 'surprise'): void {
+  activeScene = id;
+  state = sceneState(scene);
+  $('vibe-blurb').textContent = scene.blurb ?? '';
+  const surprise = $<HTMLSelectElement>('scene-pick').querySelector<HTMLOptionElement>('option[value="surprise"]');
+  if (surprise) surprise.hidden = id !== 'surprise';
+  if (scene.trip !== undefined) {
+    const trip = $<HTMLInputElement>('trip');
+    trip.value = String(scene.trip);
+    trip.dispatchEvent(new Event('input'));
+  }
   // Layers the scene doesn't mention fall back to their defaults, which are "on".
   send(statePatch());
   syncAll();
@@ -704,6 +735,7 @@ function init(): void {
   updateTubes();
   initChrome();
   $('seed').textContent = seed;
+  $('vibe-blurb').textContent = SCENES[0].blurb ?? '';
   $('play').addEventListener('click', () => void togglePlay());
   $('reseed').addEventListener('click', () => void reseed());
   $<HTMLInputElement>('volume').addEventListener('input', (e) => {
