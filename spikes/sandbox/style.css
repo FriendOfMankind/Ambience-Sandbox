@@ -160,3 +160,20 @@ body.flat canvas#scene { height: 60vh; top: 90px; }
 
 @media (prefers-reduced-motion: reduce) { .meter span, .cmeter span { transition: none; } }
 body.calm .meter span, body.calm .cmeter span { transition: none; }
+
+/* ---------------------------------------------------------------- screensaver */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+body.saver .top, body.saver .dials, body.saver .status, body.saver .advanced, body.saver .error { opacity: 0; pointer-events: none; visibility: hidden; }
+body.saver { cursor: none; }
+.top, .dials, .status { transition: opacity 0.6s ease; }
+.saver-hint {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); z-index: 8;
+  transform: translateX(-50%);
+  display: none; align-items: center; gap: 10px;
+  padding: 6px 8px 6px 6px; border-radius: 999px;
+  background: rgba(3, 4, 7, 0.6); color: var(--mute); font-size: 12px;
+  opacity: 0; transition: opacity 0.5s ease;
+}
+body.saver .saver-hint { display: flex; }
+body.saver .saver-hint.show, body.saver .saver-hint:focus-within { opacity: 1; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .top, .dials, .status, .saver-hint { transition: none; } }

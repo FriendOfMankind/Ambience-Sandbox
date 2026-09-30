@@ -725,6 +725,7 @@ function initChrome(): void {
   advBtn.addEventListener('click', () => setAdv(adv.hidden === true));
   $('adv-close').addEventListener('click', () => setAdv(false));
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !adv.hidden) setAdv(false); });
+  initSaver();
 }
 
 function init(): void {
@@ -758,6 +759,77 @@ function init(): void {
   renderStatus();
   view.start();
   placeDials();
+}
+
+// ------------------------------------------------------------------ screensaver
+
+/**
+ * Screensaver: all controls hide and only the world remains (fullscreen where the browser
+ * allows it; inside some frames it can't, and the page still clears its own chrome).
+ * Esc, the exit pill or H leave it. It can also start by itself after a few idle minutes
+ * while sound is playing.
+ */
+const SAVER_IDLE_MS = 3 * 60 * 1000;
+let saverOn = false;
+let saverFullscreen = false;
+let lastInput = performance.now();
+let hintTimer = 0;
+
+function setSaver(on: boolean): void {
+  if (on === saverOn) return;
+  saverOn = on;
+  document.body.classList.toggle('saver', on);
+  $('saver-toggle').setAttribute('aria-pressed', String(on));
+  $('saver-live').textContent = on ? 'Screensaver on. Press Escape or H to exit.' : 'Screensaver off.';
+  view3d?.setFocus(null);
+  if (on) {
+    $('advanced').hidden = true;
+    $('adv-toggle').setAttribute('aria-expanded', 'false');
+    showSaverHint();
+    const el = document.documentElement;
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      el.requestFullscreen().then(() => (saverFullscreen = true)).catch(() => (saverFullscreen = false));
+    }
+  } else {
+    if (saverFullscreen && document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+    saverFullscreen = false;
+    $('saver-toggle').focus({ preventScroll: true });
+  }
+}
+
+/** A small exit pill that appears when the pointer moves, then fades. */
+function showSaverHint(): void {
+  const hint = $('saver-hint');
+  hint.classList.add('show');
+  clearTimeout(hintTimer);
+  hintTimer = window.setTimeout(() => hint.classList.remove('show'), 2500);
+}
+
+function initSaver(): void {
+  $('saver-toggle').addEventListener('click', () => setSaver(!saverOn));
+  $('saver-exit').addEventListener('click', () => setSaver(false));
+  const auto = $<HTMLInputElement>('saver-auto');
+  auto.checked = store.get('tarn.saverAuto') !== '0';
+  auto.addEventListener('change', () => store.set('tarn.saverAuto', auto.checked ? '1' : '0'));
+  const activity = () => {
+    lastInput = performance.now();
+    if (saverOn) showSaverHint();
+  };
+  window.addEventListener('pointermove', activity, { passive: true });
+  window.addEventListener('pointerdown', activity, { passive: true });
+  window.addEventListener('keydown', (e) => {
+    lastInput = performance.now();
+    const t = e.target as HTMLElement;
+    const typing = t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type === 'text');
+    if (saverOn && (e.key === 'Escape' || e.key === 'h' || e.key === 'H')) { e.preventDefault(); setSaver(false); return; }
+    if (!saverOn && !typing && (e.key === 'h' || e.key === 'H') && !e.metaKey && !e.ctrlKey && !e.altKey) setSaver(true);
+  });
+  // Leaving browser fullscreen (its own Esc) also leaves the screensaver.
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && saverOn && saverFullscreen) setSaver(false); });
+  // Auto-start after idle, only while music or ambience is playing and no panel is open.
+  window.setInterval(() => {
+    if (!saverOn && auto.checked && playing && $('advanced').hidden && performance.now() - lastInput > SAVER_IDLE_MS) setSaver(true);
+  }, 5000);
 }
 
 init();

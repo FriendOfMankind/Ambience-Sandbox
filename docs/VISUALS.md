@@ -18,6 +18,8 @@ The user found the old contour hills and floating chime rods underwhelming. They
 - **Trip fold fix:** the kaleidoscope now bends *coordinates* toward their mirrored positions (no double image), starting at the screen edge from about Trip 62 and creeping inward, always leaving a clear area around the object.
 - **Quality:** software rendering gets the Low tier (1024² near map, 256-grid, 0.3× reflection); otherwise Medium (2048², 384-grid, 0.5× reflection). Real-GPU frame rate is still unmeasured.
 
+- **Screensaver** (added after Phase 1): the top-bar button or H hides every control, and requests fullscreen where the browser allows. Esc, H or the exit pill (shown when the pointer moves) leaves it. It starts automatically after 3 idle minutes while playing; this can be switched off in Advanced and is remembered per browser.
+
 **Next:** Phase 2 (grass, bushes, conifers pushed by the wind; streams, waterfalls, snowfall, splashes), Phase 3 (Perform processors glitch the world), Phase 4 (wildlife).
 
 ## Rule

@@ -1,141 +1,121 @@
-# Session handoff (2026-09-28)
+# Handoff: Tarn Sandbox (updated 2026-09-30, end of session 2)
 
-Where things stand, so the next session can pick up without re-reading the whole chat.
+Read this first, then the doc for whatever you're working on:
+- Visuals: **docs/VISUALS.md**
+- Music: **docs/MUSIC.md**
+- Research on how ambient is made: **docs/AMBIENT-RESEARCH.md**
+- The original product plan: **docs/PLAN.md** (long; decisions in §11)
 
-## Start here: world v2 phase 1 is built (docs/VISUALS.md → World v2); get the user's reaction, then Phase 2 (vegetation)
+## 1. Where things stand
 
-## Before that: the Perform processors are built (looper, tape Age, grains, Swell, Freeze, Orbit, piano, voicings); nothing new has been heard
+Tarn Sandbox is a browser toy: generative ambient music with natural ambience (rain, wind, chimes) underneath, all synthesised live in an AudioWorklet (no samples). It comes with a Three.js world. **The music shapes a glowing object; the ambience is the weather; the object travels through an alien valley.**
 
-After researching how ambient is made and played live (docs/AMBIENT-RESEARCH.md), the user said "let's implement this research". All seven gaps are built; see docs/MUSIC.md → Perform. The user still hasn't reported listening to music v2 either. Get listening feedback before adding more.
+- **Live artifact (private to the user):** https://claude.ai/artifact/EmgHKG7SRPbddKAt3WWwQw. Republish with `npm run build:artifact`, then publish `dist-artifact/sandbox.html` to that URL (from a new chat, pass it as `url`; read it first).
+- **Tarn Lab** (listening test bench, older): https://claude.ai/artifact/9R9E3oy5W6uiaPzY38eThq
+- **Branch:** `claude/kind-clarke-lpoa37` (continues `claude/sleepy-ptolemy-04oiyd`). Everything is committed and pushed. No PR exists.
 
-## Earlier: music engine v2 + music/ambience split
+**Built so far, in order:**
+1. **Session 1:** audio engine: rain, wind, chimes, music, reverb, limiter; the Lab.
+2. **Session 2:**
+   - visuals v1 (object and floating dials)
+   - music engine v2: 7 voices, mood and movement dials, Music/Ambience split, Blend
+   - Perform processors: looper, tape Age, grains, Swell, Freeze, Orbit, piano, voicings
+   - 22 vibes plus Surprise me
+   - world v2 phase 1: valley, lakes with reflection, ringed-planet sky, chime trees, object travel, Trip fold fix
+   - screensaver mode
 
-Session 2, part 2: the user asked for Music and Ambience as two sections, much more musical control, and more instruments and techniques. They chose: chimes move to Ambience; lo-fi beats as an option but mostly soft; 432 Hz and binaural as optional extras; build the core first, then a listening round. **Read docs/MUSIC.md.** Nothing new has been heard yet. Tune by ear next (voice balance, bowl partials, choir formants, beat feel), then the planned extras (granular shimmer, handpan, instruments from the idea list).
+## 2. The user and how to work with them
 
-## Earlier in session 2: visuals prototype v1
+- **Ask before designing.** They want to be asked, not guessed at. Offer a recommendation with each question. They answer tersely ("c", "yes", "lets do it").
+- **Be honest and push back** (their standing preference). Say what's unverified. Don't flatter.
+- **Casual tone, concise.** A little swearing is fine; never "fuck".
+- **They make decisions from screenshots.** Send renders at each milestone.
+- **They have not reported listening to anything built in session 2**, and they have never given an fps number. Everything musical has been tuned by measurement only. Keep asking for both, briefly.
 
-Session 2 (2026-09-28) built the synaesthetic 3D view. The design, grammar, safety measures and known limits are in **docs/VISUALS.md**; read that first.
+## 3. Map of the code
 
-- User's direction: trippy and psychedelic but sleek and luxurious; the object should be "an enigma of crazy lines and shapes"; the dials should feel part of the environment, with the shape morphing as you edit. They approved the per-layer grammar, dials **replacing** the strips (everything else lives under Advanced), the kaleidoscope **only at high Trip**, and **Trip 60** as the default.
-- Code: `spikes/sandbox/view3d.ts` (the view), `shaders.ts`, `dials.ts`, `flash.ts` (WCAG flash meter). `main.ts` now builds the full-screen layout. The 2D `view.ts` stays as the fallback when WebGL2 is missing.
-- Checks: `npm test` (includes `tests/flash.test.ts`), `node scripts/flash-check.mjs` (fixed-clock stress test of the real renderer, with a must-fail strobe control), `node scripts/visual-preview.mjs <dir> [trip] [w] [h] [ui]` (deterministic stills; `HIDE=shell,cage,…` isolates parts), `node scripts/visual-check.mjs` (real-time run with audio).
-- **Not verified:** frame rate on a real GPU (the container only has software GL at ~0.5 fps), and real screen-reader use. Ask the user for an fps reading (`__tarnVisual.stats()` in the console) on their machine.
-- Branch: `claude/kind-clarke-lpoa37` (continues `claude/sleepy-ptolemy-04oiyd`).
-- The user rejected nothing yet; wait for their reaction to the screenshots and the published artifact before tuning further. Candidate next steps: make the hills read as mountains, a more sculptural shell (fewer ball-like poses), a Focus-mode preset of Trip, and adding the visual to the Lab.
+| Path | What |
+|---|---|
+| `src/audio/world/WorldSynth.ts` | All layers in one worklet; bus: Blend and the ambience "support" dip under music |
+| `src/audio/music/MusicSynth.ts` | Composer (chords, voicings, pedal, free/loops/pulse rhythms, Breath) plus pad and FM keys |
+| `src/audio/music/voices.ts` | Drone, Bowls, Plucks (Karplus–Strong), Piano, Choir (formants), Beat (lo-fi), Shimmer, Biquad |
+| `src/audio/music/fx.ts` | Looper (sound-on-sound), Tape (Age), Granular (Texture) |
+| `src/audio/music/scales.ts` | `buildScale` (root, family, Light → mode, Purity → just intonation, 432 Hz) |
+| `src/audio/nature/*` | Rain, wind, chimes (session 1) |
+| `spikes/sandbox/main.ts` | UI: dial clusters (Mood, Movement, Instruments, Perform, Ambience), Advanced drawer, vibes, Surprise me, screensaver |
+| `spikes/sandbox/scenes.ts` | Vibes (`SCENES`), `randomVibe`, state ↔ worklet patch, the Space and Purity macros |
+| `spikes/sandbox/view3d.ts` | The view: object, event → visual mapping, travel and camera, post (feedback, fold, bloom), flash guard |
+| `spikes/sandbox/world.ts` / `worldShaders.ts` | Path, distance field, height bake, terrain grids, water and reflection, sky, chime trees |
+| `spikes/sandbox/shaders.ts` | Object, particles, rain and haze, post shaders |
+| `spikes/sandbox/flash.ts` | WCAG 2.3.1 flash meter (runtime guard and tests) |
+| `spikes/sandbox/dials.ts` | Accessible dials (a native range input under a drawn ring) |
+| `spikes/lab/` | The Lab (uses `scenes.ts`) |
 
-**Parked, not forgotten:** audio tuning from the Lab feedback (see "Lab feedback, round 1" below).
+## 4. Build, test, verify
 
-### Background kept from session 1
+- `npm test`: 66 tests, about 3 minutes; the Lab render test is the slow one (300 s timeout).
+- `npm run build:artifact` → `dist-artifact/sandbox.html` (about 766 KB, single file).
+- `node scripts/flash-check.mjs`: renders the real scene on a fixed clock with worst-case event bursts. A deliberate strobe control **must fail** (it proves the meter works); every other scenario must stay at 3 flashes/s or below. Run it after any visual change.
+- `node scripts/visual-preview.mjs <outDir> [trip] [w] [h] [ui]`: deterministic stills. Environment variables: `SHOTS=40,90`, `SCALE=0.7`, `THETA=0.8` (jump along the path; 0 = the Tarn, about 0.17 = a chime tree, 0.8 = meadows), `HIDE=shell,cage,core,terrain,lake,sky,rain,haze,trees`, `TAG`.
+- `node scripts/visual-check.mjs <outDir> <sec>`: a real-time run with audio (checks for console errors).
+- **This container has software GL only (SwiftShader, about 0.5–2 fps).** Real frame rates can't be measured here; use fixed-step renders. It auto-selects the Low quality tier. Screenshots of 960×540 take about 1 minute; run them in parallel.
+- **Test hooks** on `window.__tarnVisual`: `pinScale`, `step(dt)`, `measureEveryProbe`, `debugStrobe`, `hide`, `teleport(theta)`, `stats()`.
+- **Gotchas:**
+  - `AudioWorkletNode.disconnect()` doesn't stop a processor; post `{type:'stop'}` first.
+  - Artifacts only allow inline code (three is bundled) and downloads are inert.
+  - Any particle or point visual must stay at 1.5 px or larger with conserved energy, or it shimmers and trips the flash meter.
 
-The engine reports per-sound events: `WorldEvents.rain[]` `{frame, pan, diameterMm, surface, bubbleHz}`, `.chimes[]` `{frame, tube, velocity}`, `.music[]` `{kind, frame, hz, velocity, step}`, and `WorldFeatures` `{level, windSpeed, gust, chordStep}`. An event's audio time is `msg.time + (event.frame − msg.frame) / sampleRate`. Keep visuals off the audio thread. `AudioWorkletNode.disconnect()` does not stop a processor; post `{type: 'stop'}` first. Artifact rules: inline everything; only cdnjs/jsdelivr scripts; downloads are inert. Tarn Lab: https://claude.ai/artifact/9R9E3oy5W6uiaPzY38eThq. Tarn Sandbox with the 3D view: https://claude.ai/artifact/EmgHKG7SRPbddKAt3WWwQw.
+## 5. Not verified yet (be upfront about these)
 
-## Built
+- Real-GPU frame rate, especially the world with its reflection pass (a second scene render).
+- Every sound from session 2: the new voices, beat, processors, vibes. Levels are matched by measurement only.
+- A screen reader actually run on the dials (structure only has been checked).
+- Whether fullscreen engages inside the claude.ai artifact frame. The screensaver falls back to just hiding the UI.
+- The mist thickness over the valley floor, and straight-looking lake edges from low angles.
 
-- **Tarn Sandbox** (`spikes/sandbox/`, published as a private claude.ai Artifact): four live-synthesised layers in one world.
-  - **Rain**: `RainSynth`. Marshall–Palmer drop sizes, impact + Minnaert bubble, near/mid/far tiers, 7 surfaces (water, leaves, grass, stone, tin roof, window glass, "Bells (unreal)"), rain in key, rain on a grid, time stretch.
-  - **Wind**: `WindSynth` + `Leaves`. Body, whistle, a canopy wash and fluttering leaves. It is the world's gust source.
-  - **Wind chimes**: `ChimeSynth`. Tuned tubes with free–free bar partials; the clapper is driven by the wind.
-  - **Music**: `MusicSynth`. Gliding pad chords and sparse FM keys with a slow "breath".
-  - A shared FDN `Reverb`, and `WorldSynth` coupling it all in one AudioWorklet (about 9% of a core).
-  - An always-on lookahead limiter with a NaN guard.
-- 41 unit tests (`npm test`). `npm run build:artifact` produces the single-file page.
+## 6. Next steps (recommended order)
 
-## Decisions made
+1. **Get the user's reaction** to world v2 and their fps (`__tarnVisual.stats()` in the console). Ask what sounds worst in "Deep rest" and "Rain study".
+2. **World Phase 2 (agreed):**
+   - instanced grass, bushes and conifers pushed by the real wind values
+   - streams and waterfalls into the lakes
+   - snowfall for cold vibes
+   - rain splashes on land
+   - quality tiers: Low/Medium/High selectable, plus auto-upgrade
+3. **World Phase 3 (agreed concept): the Perform processors glitch the world.**
 
-Desktop-first; non-commercial; rain fully synthetic (no recordings); layers are Rain / Wind / Chimes / Music; visual direction is a synaesthetic 3D object with floating dials (PLAN §11, D1–D10).
+   | Processor | What it does to the world |
+   |---|---|
+   | Freeze | Time stops (partly done: rain, travel, water) |
+   | Layers | Ghost echoes of trees and ridges |
+   | Age | VHS wear, and terrain dissolving into wireframe |
+   | Texture | Surfaces break into grains or fireflies |
+   | Trip | Mirrored mountains in the sky |
 
-## User feedback so far
+   Also a world preset per vibe: time of day, snowline, palette.
+4. **Phase 4:** wildlife (bird flocks responding to plucks, fish, a deer).
+5. **Audio tuning** by ear, once the user listens (see §8).
 
-- Rain overall: "sounds good".
-- Old tin/glass sounded like fast wind chimes or a xylophone. They were rebuilt as a short clatter and ticks, and the old sound is kept as "Bells (unreal)". **The rebuild hasn't been listened to yet.**
-- Wind leaves sounded like static or shuffling sand. They were rebuilt as canopy + flutters. **Not listened to yet.**
-- Wind, chimes and music have had no specific feedback yet.
+## 7. Decisions on record
 
-## Known gaps
+- Desktop first; non-commercial; rain fully synthetic.
+- Layers are Rain, Wind, Chimes (the ambience) plus Music.
+- Visual direction (PLAN D10): a synaesthetic object plus floating dials.
+- Dials replace the old layer strips; every control is also in Advanced.
+- The kaleidoscope appears only at high Trip; Trip defaults to 60 (each vibe now suggests its own).
+- **Music drives the object; ambience drives the background**; chimes belong to the ambience.
+- Lo-fi beats are optional and mostly soft. 432 Hz and binaural beats are optional, labelled as weak-evidence extras. No solfeggio.
+- **World:** hybrid art direction (painterly solids with glowing contour accents); the references are a ringed planet over crystalline snow peaks, and teal alien shores with turquoise shallows. The object glides, rolls and bounces along a path, and the camera follows. The Perform processors glitch reality.
+- **Screensaver:** a button or the H key; Esc, H or the exit pill leaves it; it starts automatically after 3 idle minutes while playing (can be switched off in Advanced; remembered per browser).
 
-- Scene changes cut instantly; a smooth morph is planned but not built. Scenes are level-trimmed, but not loudness-matched.
-- All synth constants are initial guesses; only the leaves are level-calibrated by measurement. Nothing has been tuned by listening beyond the user's comments above.
-- There's no persistence, no save/share link and no Focus mode or timer yet (PLAN M6/M7).
-- The 3D visual's frame rate is unmeasured on real hardware.
+## 8. Parked audio work (from Lab feedback, round 1, 2026-09-28)
 
-## Tarn Lab (added after the first version of this handoff)
-
-`spikes/lab/`: a listening test bench with 30 isolated tests (start here: tin, glass, leaves), ratings, problem tags, level/tone/density nudges, tweakable sliders, and a pasteable **Report**. Build with `npm run build:lab`. Tests are defined in `spikes/lab/tests.ts`; `tests/lab.test.ts` renders each one headlessly.
-
-Objective levels measured while building it (20 s renders, RMS / peak before the limiter): the spread is large, and several tests are far too hot. Gale wind peaks at +15 dBFS, tin at +6, wind whistle at +5, bright chimes at +2.5, and scenes 2 (Storm), 3 and 6 at +8, +3 and +3.5. Drizzle sits at −44 dB RMS and Wind chimes (bronze) at −38 dB. Nothing has been level-calibrated across layers, so treat these as the first things to fix once listening feedback is in.
-
-## Lab feedback, round 1 (2026-09-28) and what was found
-
-19 of 30 tests were rated on desktop speakers. Findings, separating measured fact from listening opinion:
-
-- **Bug (fixed): disconnected synth nodes kept rendering.** `node.disconnect()` does not stop an AudioWorklet processor, so every test switched away from kept a full `WorldSynth` running in the audio thread. After ~20 switches that is enough load to cause dropouts, which sound like static on *everything*, including layers whose offline render is clean (music pad: 4–8 kHz at −97 dB; chimes: silent between strikes). Fix: `world.worklet` now handles `{type:'stop'}` by returning `false` from `process()`, and the Lab and the sandbox's re-seed post it before disconnecting. Verified in Chromium: after 9 node switches only one processor is still posting. **Any "static / hiss" tag on chimes, pad, or wind from before this fix is suspect and should be re-rated.**
-- **Real (measured, independent of the bug): the far-tier wash is surface-blind.** `renderFar` is pink noise through fixed filters, its level depends only on rain rate. At 6 mm/h it sits at about −35 dB RMS for every surface, while the actual drops on grass are ~28 dB below it (mid/near ≈ −63 dB), stone ~11 dB below, leaves ~5 dB below. So leaves, grass and stone tests are mostly the same generic hiss (spectra match to within 1 dB), which lines up with the "static / hiss, thin" tags. Tin's drops sit above the wash, and it wasn't flagged for the drops themselves.
-- **Listening opinions to act on:** rain on water is a little high-pitched with "wet rubber squeaks" (bubble pitch/glide; rain-in-key is "too high pitched" too). Wind leaves sound like cards shuffling / a guiro scraped along a frog's back (the flutter clicks are too regular and ticky). Gale is too loud and harsh (RMS −7 dB, limiter touching); whistle too loud; downpour too loud; wood and bright chimes too loud. Drizzle 5/5 and light breeze 5/5. Glass 4/5 and 5/5 pleasant.
-- Not yet heard: music keys / both / Lydian and all 8 scenes.
-
-## Suggested next steps
-
-1. **Visuals**: prototype v1 built (see "Start here" and docs/VISUALS.md); iterate on the user's reaction.
-2. Audio tuning, parked. Re-rate the "static" tests in the Lab with the leak fix, then act on the round-1 findings: level-match gale / whistle / downpour / wood and bright chimes, fix the surface-blind rain wash (open question to the user: should grass be a real hush, or as distinct as tin?), lower the bubble pitch/squeak, make the leaf flutters less regular. Rate the music keys / both / Lydian and the 8 scenes, which have not been heard.
-3. Scene morphing (parameter interpolation) and loudness-matched scenes.
-4. Save/share: URL-encoded world + seed (PLAN §7.8).
-
-## Idea list: ambient instruments to add (and show in 3D)
-
-Requested at the end of the session. First written from general knowledge while web search was unavailable, then checked against sources once search came back (see "Verified notes" below). The tables are design ideas; the notes are the facts they rest on.
-
-The strongest ideas are **driven by the world state that already exists** (rain events, wind speed and gusts, the key), so they play *themselves* and belong to the place rather than being pasted on. A second design idea: **the instruments can be the floating "dials"** around the central 3D object. Click the rain drum to open its controls.
-
-### Tier 1: coupled to rain or wind, reuses existing engine parts
-
-| Instrument | What it is | How it would play | Synthesis (reuse) | 3D representation |
-|---|---|---|---|---|
-| **Rain drum** (tongue drum left in the rain) | A steel tongue drum whose tongues are tuned to a scale. Real ones in real rain mostly sound like rain on metal; the melodic viral videos are usually dubbed (see notes) | Rain's near-drop events strike random tongues; heavier rain means more notes. Always in key. We can build the *imagined* version, which is a sandbox strength | Modal tongues via `ResonatorBank`, triggered by `RainEvent`s | A drum whose tongues light up (pitch → hue) as drops land on them |
-| **Shishi-odoshi** (bamboo deer-scarer fountain) | A bamboo seesaw that fills with water, tips and knocks a stone | A hollow "tok" whose rhythm comes from the rain rate or stream flow; more water, faster knocks | A wood-knock modal hit, plus a water pour from the drop synth | A bamboo tube slowly filling (visible water level), tipping, splashing |
-| **Suikinkutsu** (Japanese buried water harp) | An upturned buried pot; drips fall inside and ring like tiny bells, with echo | Drips from rain or a slow seeded rhythm | Existing bubble synth + a resonant cavity (comb filter or modal) | Droplets falling into a glowing underground chamber, with rings spreading on the inner water |
-| **Rain chain** | A chain of cups down a gutter; water cascades cup to cup | Each cascade plays a falling run of pitched plinks, triggered by rain rate | Drop/bubble synth with pitch per cup and small delays | A vertical chain; water visibly steps down cup by cup |
-| **Aeolian harp** (wind harp) | Strings that the wind makes sing; the wind excites whichever harmonic is nearest the vortex-shedding frequency | Driven entirely by wind speed and gusts: as the wind changes, the sounding harmonic hops up and down the series, and it goes quiet outside its speed range | Harmonic partial bank; excite the harmonic nearest f = 0.2·u/d (u = wind speed, d = string diameter) | Strings vibrating, with glowing standing-wave nodes; gusts ripple along them |
-| **Bamboo / wooden chimes** | Hollow, dry, clacky chimes | Same wind clapper as the metal chimes | `ChimeSynth` with short, damped "wood" modes (mostly a material preset) | Bamboo tubes knocking together |
-| **Rainstick** | A tube of pebbles cascading over internal pins | Slow cascades on gust peaks, or as a transition sound between scenes | Particle cascade of tiny clicks (like rain near-drops, with no bubbles) | A slowly turning tube, pebbles visible as streaming particles inside |
-
-### Tier 2: musical voices for the music layer
-
-| Instrument | Character | Synthesis | 3D representation |
-|---|---|---|---|
-| **Singing bowls / crystal bowls** | Long, beating, shimmering tones; asymmetry splits each mode into two close frequencies, and their beating is the "wah-wah" | Each mode as a pair detuned by a few Hz; strike or slow "rubbed" swell | A bowl whose surface shows standing-wave ripple patterns |
-| **Handpan** | Warm, bell-like notes arranged around a central low note (the "ding") | Three partials per note at about 1:2:3 (fundamental, octave, compound fifth); generative patterns | A dome with note fields lighting in turn |
-| **Kalimba / music box** | Plucked tines; delicate melodic fragments | Plucked modal tines; a seeded melody "cylinder" | A rotating pin cylinder plucking a comb; the cylinder *is* the melody, readable at a glance |
-| **Glass harmonica / wine glasses** | Pure, glassy sustained tones with slow attack | Near-sine partials with slow swell | Rotating glass bowls with light refracting as they sound |
-| **Shruti box / drone reeds** | A breathing harmonium drone | Reed-like wave through formant filters; the "bellows" follow wind or a slow breath | Bellows expanding and contracting in time with the sound |
-| **Gong / tam-tam swells** | Slow, blooming shimmer; good for scene transitions | Modal bank with gradual energy transfer to upper partials | A disc whose surface shimmers outward from the strike point |
-| **Distant cowbells** (fits the alpine Tarn) | A herd wandering on the far hillside | Short bell modal hits, distance-filtered, slowly wandering in stereo | Faint lights moving along the far slope |
-
-### Tier 3: strange mode, for the "unrestricted sandbox"
-
-| Instrument | Character | 3D representation |
-|---|---|---|
-| **Waterphone** | Bowed metal rods over a water-filled body: eerie, gliding, horror-film tones | A spiky crown whose rods glow and bend as they sound |
-| **Spring drum / "thunder tube"** | Boingy, dispersive thunder-like sweeps; could *be* the thunder in strange storms | A coiled spring with a wave travelling along it |
-| **Lithophone** (stone xylophone) | Dry, pitched stone clicks | Floating stones that ring when touched |
-| **Insect / frog chorus as rhythm** | Polyrhythmic natural pulses locked (or not) to the music's tempo | Swarms of lights pulsing in rhythmic groups |
-
-### Verified notes (sources)
-
-- **Rain drum.** Outdoor "rain drums" are small, high-tuned steel tongue drums. A luthier's write-up says real rain on one sounds like rain on a metal roof, not melodies; viral clips are usually dubbed with mallet recordings. Our design should aim for the imagined version, and say so. [Hluru: do rain drums work in the rain?](https://www.hluru.net/en-us/blogs/skills-tips/do-rain-drums-work-in-the-rain-a-luthiers-truth-behind-the-viral-trend), [Hluru: what is an outdoor rain drum](https://www.hluru.net/en-us/blogs/skills-tips/what-is-an-outdoor-rain-drum-a-garden-guide-to-natures-rhythm)
-- **Suikinkutsu.** An upside-down buried pot with a hole on top. Water drips onto a small pool inside, and the chamber rings "like a bell or a Japanese zither". No two sound the same. [Wikipedia](https://en.wikipedia.org/wiki/Suikinkutsu)
-- **Shishi-odoshi.** A bamboo tube on an off-centre pivot fills from a trickle, tips once it's top-heavy, empties, then falls back and knocks a rock. The knock interval is set by the water flow, so coupling it to rain rate is physically right. [Wikipedia](https://en.wikipedia.org/wiki/Shishi-odoshi)
-- **Aeolian harp.** Wind shedding vortices off a string (a von Kármán vortex street) makes it vibrate. Shedding frequency ≈ 0.2·u/d, and it excites the string harmonic nearest that frequency, so you usually hear a harmonic, not the fundamental. Each string only sounds within a band of wind speeds; wind-induced vibration is typically at 1–7 m/s. [Wikipedia](https://en.wikipedia.org/wiki/Aeolian_harp), [Geophysical Institute](https://www.gi.alaska.edu/alaska-science-forum/aeolian-harp), [real-time physical model paper](https://www.researchgate.net/publication/319664701_REAL-TIME_PHYSICAL_MODEL_OF_AN_AEOLIAN_HARP)
-- **Singing bowls.** Asymmetry splits each vibration mode into two close frequencies (a few Hz apart), and their beating is the characteristic pulsing. [Terwagne & Bush, "Tibetan singing bowls" (arXiv)](https://arxiv.org/pdf/1106.6348)
-- **Handpan.** Each tone field is tuned so three resonances line up near 1:2:3 (fundamental, octave, compound fifth); a detuned partial dulls the note or makes it beat. [Hang (instrument), Wikipedia](https://en.wikipedia.org/wiki/Hang_(instrument)), [Tapadum overtone guide](https://tapadum.com/handpan-tuner-free-online-overtone-analyzer/)
-- **Rainstick.** A hollow cactus branch with spines driven inward as a lattice, filled with pebbles, rice or beans. The rain sound is a chain of many small impacts as the filler trickles past the spines. [Wikipedia](https://en.wikipedia.org/wiki/Rainstick), [Exploratorium](https://www.exploratorium.edu/snacks/make-your-own-rainstick)
-- **Waterphone.** A stainless-steel resonator with a little water inside, ringed by bronze rods of different lengths tuned in mixed microtonal and diatonic relationships. It is bowed or struck, and tilting shifts the water so pitches bend and wobble. Invented by Richard Waters; a horror-film staple. [Wikipedia](https://en.wikipedia.org/wiki/Waterphone)
-- Not yet checked: ocean drum, rain chain, Koshi chimes, shruti box, gong, glass harmonica, lithophone, cowbells. Their table entries are general knowledge.
-
-### Suggested order
-
-1. **Rain drum.** Smallest step (ResonatorBank + RainEvents already exist) and the most on-brand. It turns rain into melody by construction.
-2. **Aeolian harp.** Makes the wind musical the way the chimes did, and suits a 3D string visual.
-3. **Shishi-odoshi.** Its rhythm follows rain, and it gives the scene a clear visual "clock".
-4. **Singing bowls**, as a calmer alternative to the pad in Focus mode.
-
-Each new instrument should follow the existing pattern: a pure-DSP class, events + per-layer level reported through `WorldSynth`, a strip or dial in the UI, and unit tests for determinism, bounds and "is it in key".
+These predate music v2 but still apply to the ambience:
+- **Bug, fixed:** disconnected synth nodes kept rendering. Any "static / hiss" tags from before that fix are suspect.
+- **Measured:** the far rain wash is surface-blind (leaves, grass and stone sound like the same hiss).
+- **Opinions to act on:**
+  - Water bubbles squeak high.
+  - Wind leaves are too regular and "ticky".
+  - Too loud: gale, whistle, downpour, wood and bright chimes.
+  - Liked: drizzle, light breeze and glass.
+- The instrument idea list (rain drum, Aeolian harp, shishi-odoshi, singing bowls…) is in **docs/INSTRUMENT-IDEAS.md**.
