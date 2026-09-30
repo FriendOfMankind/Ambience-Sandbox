@@ -60,6 +60,8 @@ export class Drone {
   private readonly swellRate = new Float64Array(HARMONICS.length);
   private readonly panL = new Float64Array(HARMONICS.length);
   private readonly panR = new Float64Array(HARMONICS.length);
+  private readonly orbitPh = new Float64Array(HARMONICS.length);
+  private readonly orbitRate = new Float64Array(HARMONICS.length);
   private readonly cw = new Float64Array(HARMONICS.length);
   private readonly sw = new Float64Array(HARMONICS.length);
   private bl = [1, 0];
@@ -71,6 +73,8 @@ export class Drone {
     HARMONICS.forEach((h, i) => {
       this.swell[i] = rng.next() * TAU;
       this.swellRate[i] = TAU / rng.range(14, 48);
+      this.orbitPh[i] = h * 1.7;
+      this.orbitRate[i] = (TAU / rng.range(18, 60)) * (i % 2 ? -1 : 1);
       const pan = Math.sin(h * 1.7) * 0.5;
       this.panL[i] = Math.cos(((pan + 1) * Math.PI) / 4);
       this.panR[i] = Math.sin(((pan + 1) * Math.PI) / 4);
@@ -88,10 +92,19 @@ export class Drone {
     });
   }
 
-  process(L: Float32Array, R: Float32Array, frames: number, level: number, binaural: number, beatHz: number): void {
+  process(L: Float32Array, R: Float32Array, frames: number, level: number, binaural: number, beatHz: number, orbit = 0): void {
     if (this.level.silent(level) && binaural === 0) return;
     const fs = this.fs;
     const dt = frames / fs;
+    // Orbit: each partial circles slowly through the stereo field, some one way, some the other.
+    if (orbit > 0.001) {
+      for (let i = 0; i < HARMONICS.length; i++) {
+        this.orbitPh[i] += this.orbitRate[i] * orbit * dt;
+        const pan = Math.sin(this.orbitPh[i]) * (0.5 + 0.35 * orbit);
+        this.panL[i] = Math.cos(((pan + 1) * Math.PI) / 4);
+        this.panR[i] = Math.sin(((pan + 1) * Math.PI) / 4);
+      }
+    }
     this.rootHz += (this.targetHz - this.rootHz) * (1 - Math.exp(-dt / 3));
     const g = this.level.step(level, frames);
     // Per-block partial amplitudes and rotation coefficients.
@@ -179,6 +192,7 @@ export class Bowls {
   private readonly envRate = new Float64Array(BOWL_VOICES);
   private readonly panL = new Float64Array(BOWL_VOICES);
   private readonly panR = new Float64Array(BOWL_VOICES);
+  private readonly panAngle = new Float64Array(BOWL_VOICES);
   private readonly level: Level;
 
   constructor(private readonly fs: number, private readonly rng: Rng) {
@@ -200,6 +214,7 @@ export class Bowls {
     this.env[v] = 0;
     this.envRate[v] = 1 / ((rubbed ? rng.range(0.9, 1.8) : 0.006) * fs);
     const pan = rng.range(-0.7, 0.7);
+    this.panAngle[v] = Math.asin(pan);
     this.panL[v] = Math.cos(((pan + 1) * Math.PI) / 4);
     this.panR[v] = Math.sin(((pan + 1) * Math.PI) / 4);
     for (let m = 0; m < BOWL_MODES; m++) {
@@ -219,12 +234,21 @@ export class Bowls {
     }
   }
 
-  process(L: Float32Array, R: Float32Array, frames: number, level: number): void {
+  process(L: Float32Array, R: Float32Array, frames: number, level: number, orbit = 0): void {
     const g = this.level.step(level, frames);
     let any = false;
     for (let v = 0; v < BOWL_VOICES; v++) if (this.active[v]) any = true;
     if (!any) return;
     const k0 = 0.07 * g;
+    if (orbit > 0.001) {
+      const dt = frames / this.fs;
+      for (let v = 0; v < BOWL_VOICES; v++) {
+        this.panAngle[v] += (TAU / (14 + v * 3)) * orbit * dt * (v % 2 ? -1 : 1);
+        const pan = Math.sin(this.panAngle[v]) * 0.85;
+        this.panL[v] = Math.cos(((pan + 1) * Math.PI) / 4);
+        this.panR[v] = Math.sin(((pan + 1) * Math.PI) / 4);
+      }
+    }
     for (let v = 0; v < BOWL_VOICES; v++) {
       if (!this.active[v]) continue;
       for (let n = 0; n < frames; n++) {
@@ -281,6 +305,8 @@ export class Plucks {
   private readonly active = new Uint8Array(PLUCK_VOICES);
   private readonly panL = new Float64Array(PLUCK_VOICES);
   private readonly panR = new Float64Array(PLUCK_VOICES);
+  private readonly env = new Float64Array(PLUCK_VOICES);
+  private readonly envInc = new Float64Array(PLUCK_VOICES);
   private readonly level: Level;
   private next = 0;
 
@@ -290,7 +316,8 @@ export class Plucks {
     this.level = new Level(1 - Math.exp(-1 / (0.3 * fs)));
   }
 
-  pluck(hz: number, velocity: number, brightness: number, ring: number): void {
+  /** `attackSec` > 0 fades the string in: a volume swell instead of a pluck. */
+  pluck(hz: number, velocity: number, brightness: number, ring: number, attackSec = 0): void {
     const fs = this.fs;
     if (hz < 45 || hz > fs * 0.15) return;
     const v = this.next++ % PLUCK_VOICES;
@@ -319,6 +346,8 @@ export class Plucks {
     for (let i = 0; i < N; i++) b[i] = (b[i] - mean) * velocity;
     this.energy[v] = 1;
     this.active[v] = 1;
+    this.env[v] = attackSec > 0.005 ? 0 : 1;
+    this.envInc[v] = attackSec > 0.005 ? 1 / (attackSec * fs) : 0;
     const pan = rng.range(-0.6, 0.6);
     this.panL[v] = Math.cos(((pan + 1) * Math.PI) / 4);
     this.panR[v] = Math.sin(((pan + 1) * Math.PI) / 4);
@@ -349,7 +378,8 @@ export class Plucks {
         y1 = y;
         b[pos] = y;
         pos = pos + 1 === N ? 0 : pos + 1;
-        const s = out * g;
+        if (this.env[v] < 1) this.env[v] = Math.min(1, this.env[v] + this.envInc[v]);
+        const s = out * g * this.env[v];
         L[n] += s * this.panL[v];
         R[n] += s * this.panR[v];
         e += out * out;
@@ -359,6 +389,121 @@ export class Plucks {
       this.apX[v] = x1;
       this.apY[v] = y1;
       if (e / frames < 1e-9 || !Number.isFinite(e)) this.active[v] = 0;
+    }
+  }
+}
+
+// ------------------------------------------------------------------ soft piano
+
+const PIANO_VOICES = 8;
+const PIANO_PARTIALS = 6;
+/** Oscillators per voice: partials 1 and 2 are pairs (two strings, slightly apart), the rest single. */
+const PIANO_OSC = PIANO_PARTIALS + 2;
+const PIANO_B = 0.0003; // string inharmonicity
+
+/**
+ * "Soft pedal" piano after Harold Budd: a felt-hammer attack, dark partials on quiet notes,
+ * long decays, and the two strings of the lower partials beating slowly against each other.
+ */
+export class Piano {
+  private readonly active = new Uint8Array(PIANO_VOICES);
+  private readonly c = new Float64Array(PIANO_VOICES * PIANO_OSC);
+  private readonly s = new Float64Array(PIANO_VOICES * PIANO_OSC);
+  private readonly cw = new Float64Array(PIANO_VOICES * PIANO_OSC);
+  private readonly sw = new Float64Array(PIANO_VOICES * PIANO_OSC);
+  private readonly amp = new Float64Array(PIANO_VOICES * PIANO_OSC);
+  private readonly decay = new Float64Array(PIANO_VOICES * PIANO_OSC);
+  private readonly env = new Float64Array(PIANO_VOICES);
+  private readonly envInc = new Float64Array(PIANO_VOICES);
+  private readonly panL = new Float64Array(PIANO_VOICES);
+  private readonly panR = new Float64Array(PIANO_VOICES);
+  private lpL = 0;
+  private lpR = 0;
+  private next = 0;
+  private readonly level: Level;
+
+  constructor(private readonly fs: number, private readonly rng: Rng) {
+    this.level = new Level(1 - Math.exp(-1 / (0.4 * fs)));
+  }
+
+  strike(hz: number, velocity: number, ring: number, attackSec = 0): void {
+    const fs = this.fs;
+    if (hz < 40 || hz > 2500) return;
+    const v = this.next++ % PIANO_VOICES;
+    const rng = this.rng;
+    // Lower notes ring longer.
+    const t60 = Math.max(2, Math.min(9, 8 - 1.2 * Math.log2(hz / 65))) * ring;
+    let o = 0;
+    for (let n = 1; n <= PIANO_PARTIALS; n++) {
+      const f = hz * n * Math.sqrt(1 + PIANO_B * n * n);
+      // Soft hits are darker: upper partials fall away with lower velocity.
+      const a = f < fs * 0.2 ? Math.pow(n, -1.3) * Math.exp(-(n - 1) * (1.1 - velocity) * 0.7) * velocity : 0;
+      const d = Math.pow(10, -3 / ((t60 / (1 + 0.5 * (n - 1))) * fs));
+      const strings = n <= 2 ? 2 : 1;
+      for (let k = 0; k < strings; k++) {
+        const j = v * PIANO_OSC + o++;
+        const detune = strings === 2 ? (k ? 1 : -1) * rng.range(0.1, 0.35) : 0;
+        const w = (TAU * (f + detune)) / fs;
+        this.cw[j] = Math.cos(w);
+        this.sw[j] = Math.sin(w);
+        this.c[j] = 1;
+        this.s[j] = 0;
+        this.amp[j] = a / strings;
+        this.decay[j] = d;
+      }
+    }
+    this.env[v] = 0;
+    // Felt hammer: a few ms; with Swell, a slow fade-in.
+    this.envInc[v] = 1 / (Math.max(0.006, attackSec) * fs);
+    const pan = rng.range(-0.4, 0.4) + (Math.log2(hz / 262) * 0.15);
+    this.panL[v] = Math.cos(((Math.max(-1, Math.min(1, pan)) + 1) * Math.PI) / 4);
+    this.panR[v] = Math.sin(((Math.max(-1, Math.min(1, pan)) + 1) * Math.PI) / 4);
+    this.active[v] = 1;
+  }
+
+  process(L: Float32Array, R: Float32Array, frames: number, level: number, brightness: number): void {
+    const g = this.level.step(level, frames) * 0.36;
+    let any = false;
+    for (let v = 0; v < PIANO_VOICES; v++) if (this.active[v]) any = true;
+    if (!any) return;
+    const lp = Math.exp((-TAU * (2500 + 4500 * brightness)) / this.fs);
+    for (let n = 0; n < frames; n++) {
+      let l = 0;
+      let r = 0;
+      for (let v = 0; v < PIANO_VOICES; v++) {
+        if (!this.active[v]) continue;
+        if (this.env[v] < 1) this.env[v] = Math.min(1, this.env[v] + this.envInc[v]);
+        let x = 0;
+        for (let o = 0; o < PIANO_OSC; o++) {
+          const j = v * PIANO_OSC + o;
+          const a = this.amp[j];
+          if (a < 1e-7) continue;
+          const c = this.c[j] * this.cw[j] - this.s[j] * this.sw[j];
+          this.s[j] = this.c[j] * this.sw[j] + this.s[j] * this.cw[j];
+          this.c[j] = c;
+          x += this.s[j] * a;
+          this.amp[j] = a * this.decay[j];
+        }
+        x *= this.env[v];
+        l += x * this.panL[v];
+        r += x * this.panR[v];
+      }
+      this.lpL = (1 - lp) * l + lp * this.lpL;
+      this.lpR = (1 - lp) * r + lp * this.lpR;
+      L[n] += this.lpL * g;
+      R[n] += this.lpR * g;
+    }
+    for (let v = 0; v < PIANO_VOICES; v++) {
+      if (!this.active[v]) continue;
+      let alive = false;
+      for (let o = 0; o < PIANO_OSC; o++) {
+        const j = v * PIANO_OSC + o;
+        if (this.amp[j] > 1e-6) alive = true;
+        const m = 1 / Math.hypot(this.c[j], this.s[j]);
+        this.c[j] *= m;
+        this.s[j] *= m;
+      }
+      if (!alive) this.active[v] = 0;
     }
   }
 }

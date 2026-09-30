@@ -561,6 +561,7 @@ uniform float uKal;
 uniform float uSides;
 uniform float uKalRot;
 uniform float uCA;
+uniform float uGrain;
 uniform float uExposure;
 uniform float uTime;
 uniform float uAspect;
@@ -590,7 +591,7 @@ void main(){
   col *= 1.0 - dot(v, v) * 0.9;
   col = aces(col * uExposure);
   col = pow(max(col, 0.0), vec3(1.0 / 2.2));
-  col += (hash12(vUv * 1000.0 + fract(uTime * 7.0) * 100.0) - 0.5) * 0.012;
+  col += (hash12(vUv * 1000.0 + fract(uTime * 7.0) * 100.0) - 0.5) * uGrain;
   gl_FragColor = vec4(col, 1.0);
 }
 `;

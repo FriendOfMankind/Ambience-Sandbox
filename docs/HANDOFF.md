@@ -2,7 +2,11 @@
 
 Where things stand, so the next session can pick up without re-reading the whole chat.
 
-## Start here: music engine v2 + music/ambience split is built; get the user's ears on it
+## Start here: the Perform processors are built (looper, tape Age, grains, Swell, Freeze, Orbit, piano, voicings); nothing new has been heard
+
+After researching how ambient is made and played live (docs/AMBIENT-RESEARCH.md), the user said "let's implement this research". All seven gaps are built; see docs/MUSIC.md → Perform. The user still hasn't reported listening to music v2 either. Get listening feedback before adding more.
+
+## Earlier: music engine v2 + music/ambience split
 
 Session 2, part 2: the user asked for Music and Ambience as two sections, much more musical control, and more instruments and techniques. They chose: chimes move to Ambience; lo-fi beats as an option but mostly soft; 432 Hz and binaural as optional extras; build the core first, then a listening round. **Read docs/MUSIC.md.** Nothing new has been heard yet. Tune by ear next (voice balance, bowl partials, choir formants, beat feel), then the planned extras (granular shimmer, handpan, instruments from the idea list).
 

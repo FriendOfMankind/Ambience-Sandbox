@@ -37,6 +37,12 @@ export interface VisualWorld {
   windAmount: number;
   sustain: number;
   chordSeconds: number;
+  /** Perform processors: the looper's layers echo as longer trails, freeze slows time,
+   *  tape age adds grain and fades colour, texture thickens the particle core. */
+  layers: number;
+  age: number;
+  texture: number;
+  freeze: boolean;
 }
 
 const TUBES_MAX = 8;
@@ -55,6 +61,7 @@ const ANCHORS: Record<string, THREE.Vector3> = {
   move: new THREE.Vector3(3.4, 3.8, 0.4),
   inst: new THREE.Vector3(-3.6, 0.8, 2.3),
   amb: new THREE.Vector3(3.6, 0.8, 2.3),
+  perf: new THREE.Vector3(0, -0.6, 3.6),
 };
 
 /** Camera framing per focused layer: [position, look-at]. */
@@ -131,7 +138,8 @@ export class SceneView3D {
   private queue: { time: number; fn: () => void }[] = [];
   private qHead = 0;
   private features: WorldFeatures | null = null;
-  private world: VisualWorld = { rainRate: 5, windAmount: 0.3, sustain: 1, chordSeconds: 35 };
+  private world: VisualWorld = { rainRate: 5, windAmount: 0.3, sustain: 1, chordSeconds: 35, layers: 0, age: 0, texture: 0, freeze: false };
+  private frozen = 0;
   private tubeHz: number[] = [];
   /** Bowl strikes → cymatic patterns on the shell, one slot per pitch class group. */
   private bowlKick = new Float32Array(TUBES_MAX);
@@ -401,7 +409,7 @@ export class SceneView3D {
     });
     this.compMat = quadMat(S.COMPOSITE_FRAG, { tBg: { value: null }, tFg: { value: null } });
     this.finalMat = quadMat(S.FINAL_FRAG, {
-      tIn: { value: null }, uKal: { value: 0 }, uSides: { value: 6 }, uKalRot: { value: 0 }, uCA: { value: 0.003 }, uExposure: { value: 1 },
+      tIn: { value: null }, uGrain: { value: 0.012 }, uKal: { value: 0 }, uSides: { value: 6 }, uKalRot: { value: 0 }, uCA: { value: 0.003 }, uExposure: { value: 1 },
       uTime: this.shapeU.uTime, uAspect: { value: 1 }, uCenter: this.fbMat.uniforms.uCenter,
     });
     this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.4, 0.8);
@@ -665,7 +673,8 @@ export class SceneView3D {
     let dh = this.hueTarget - this.hue;
     dh -= Math.round(dh);
     this.hue = (((this.hue + dh * (1 - Math.exp(-dt / 2.5))) % 1) + 1) % 1;
-    const sat = 0.68 + 0.27 * trip;
+    this.frozen = ease(this.frozen, this.world.freeze ? 1 : 0, dt, 0.8);
+    const sat = (0.68 + 0.27 * trip) * (1 - 0.3 * this.world.age);
 
     // Shape morph between chord poses.
     if (this.morph < 1) {
@@ -733,13 +742,13 @@ export class SceneView3D {
     this.attrD = ease(this.attrD, this.attrDTarget, dt, 6);
     this.attrBoost *= Math.exp(-dt / 0.8);
     const pu = this.posVar.material.uniforms;
-    pu.uDt.value = (rm ? 0.004 : 0.011) * (1 + 0.6 * this.attrBoost * (rm ? 0 : 1)) * Math.min(2, dt * 60);
+    pu.uDt.value = (rm ? 0.004 : 0.011) * (1 + 0.6 * this.attrBoost * (rm ? 0 : 1)) * Math.min(2, dt * 60) * (1 - 0.92 * this.frozen);
     pu.uMix.value = this.attrMix;
     pu.uD.value = this.attrD;
     pu.uSeed.value = (now * 0.37) % 100;
     this.gpu.compute();
     const posTex = this.gpu.getCurrentRenderTarget(this.posVar).texture;
-    this.attrMats.forEach((mm) => { mm.uniforms.tPos.value = posTex; mm.uniforms.uBoost.value = this.attrBoost * this.guard; });
+    this.attrMats.forEach((mm) => { mm.uniforms.tPos.value = posTex; mm.uniforms.uBoost.value = this.attrBoost * this.guard + 0.6 * this.world.texture; });
 
     // Place.
     const rainOn = this.levels.rain > 0.02 ? 1 : this.levels.rain / 0.02;
@@ -779,7 +788,7 @@ export class SceneView3D {
     this.camLook.lerp(fl, 1 - Math.exp(-dt / camTau));
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
-    this.objectGroup.rotation.y += dt * (0.05 + 0.05 * trip) * motion;
+    this.objectGroup.rotation.y += dt * (0.05 + 0.05 * trip) * motion * (1 - 0.85 * this.frozen);
     this.mirrorGroup.rotation.y = this.objectGroup.rotation.y;
 
     // ---------------------------------------------------------------- render
@@ -795,7 +804,7 @@ export class SceneView3D {
     const fb = this.fbMat.uniforms;
     fb.tCur.value = this.rt.fg.texture;
     fb.tPrev.value = this.rt.fbA.texture;
-    fb.uDecay.value = rm ? 0 : Math.min(0.86, 0.2 + 0.7 * trip) * (0.6 + 0.4 * this.guard);
+    fb.uDecay.value = rm ? 0 : Math.min(0.9, 0.2 + 0.7 * trip + 0.12 * this.world.layers + 0.1 * this.frozen) * (0.6 + 0.4 * this.guard);
     fb.uZoom.value = 1 + 0.0025 * trip + 0.0015 * music;
     fb.uRot.value = (0.0008 + 0.0025 * Math.min(1.2, this.wind)) * trip * (this.gust >= 0 ? 1 : -1);
     fb.uWarp.value = trip;
@@ -815,6 +824,7 @@ export class SceneView3D {
     fu.uKal.value = rm ? 0 : (() => { const k = Math.min(1, Math.max(0, (this.trip - 0.8) / 0.17)); return k * k * (3 - 2 * k) * 0.85; })();
     fu.uKalRot.value = now * 0.02;
     fu.uCA.value = 0.0015 + 0.004 * trip;
+    fu.uGrain.value = 0.012 + 0.03 * this.world.age;
     fu.uExposure.value = 1.05 * (0.85 + 0.15 * this.guard) * (this.strobe ? (this.frameNo % 4 < 2 ? 6 : 0.05) : 1);
     this.drawQuad(this.finalMat, null);
 

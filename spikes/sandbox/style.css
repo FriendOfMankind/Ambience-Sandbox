@@ -77,6 +77,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .cmeter { height: 1px; background: var(--faint); overflow: hidden; }
 .cmeter span { display: block; height: 100%; background: var(--tone); transform-origin: left; transform: scaleX(0); transition: transform 0.2s linear; }
 .cpower { padding: 2px 10px; font-size: 11px; }
+.freeze[aria-pressed='true'] { background: var(--tone); color: var(--void); }
 .cpower[aria-pressed='true'] { border-color: var(--tone); color: var(--tone); }
 .cluster.off .dial-row { opacity: 0.4; }
 .dial-row { display: flex; gap: 6px; }

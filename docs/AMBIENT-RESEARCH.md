@@ -47,7 +47,7 @@ Guitar (swells, EBow, open strings), voice loops, soft piano, analogue and West 
 
 **Already in Tarn:** drone (just-tuned), pad, bowls, plucks, keys, choir, beat; an FDN reverb, a ping-pong delay and an octave shimmer; Eno-style loops; Breath; just intonation; Blend with ambience.
 
-**Gaps, in order of how much they'd move it towards "pro live ambient":**
+**Gaps, in order of how much they'd move it towards "pro live ambient":** (all seven built on 2026-09-30; see docs/MUSIC.md → Perform)
 
 1. **Sound-on-sound looper (Frippertronics):** capture the music bus into a long delay (8–30 s) with feedback, degrading each pass (darker, slightly wobbly). Dials: *Layers* (feedback) and *Decay* (loss per pass). The single most defining live-ambient process, and Tarn doesn't have it.
 2. **Tape "Age":** wow, flutter, saturation, hiss and occasional dropouts on the music bus (Generation Loss, Basinski).

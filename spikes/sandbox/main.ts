@@ -5,7 +5,7 @@ import type { LimiterOutMessage } from '../../src/audio/worklets/limiter.worklet
 import { LAYERS, type LayerId, type WorldParamsPatch } from '../../src/audio/world/WorldSynth';
 import { ChimeSynth } from '../../src/audio/nature/chimes/ChimeSynth';
 import { DEFAULT_KEY, FAMILIES, lightName, ROOT_NAMES, type ScaleFamily } from '../../src/audio/music/scales';
-import { DEFAULT_MUSIC_PARAMS } from '../../src/audio/music/MusicSynth';
+import { DEFAULT_MUSIC_PARAMS, VOICING_ORDER } from '../../src/audio/music/MusicSynth';
 import { SURFACE_IDS, SURFACES } from '../../src/audio/nature/rain/surfaces';
 import { dbToGain, gainToDb } from '../../src/audio/dsp/loudness';
 import { purityDetune, SCENES, sceneState, spacePatch, stateScale, stateToPatch, type SceneState } from './scenes';
@@ -85,7 +85,7 @@ function send(patch: WorldParamsPatch): void {
 /** World state the visuals need beyond the engine's events (rain rate, chime ring time…). */
 function pushWorld(): void {
   const w = state.world;
-  view3d?.setWorld({ rainRate: w.rain.rate ?? 5, windAmount: w.wind.amount ?? 0.3, sustain: w.chimes.sustain ?? 1, chordSeconds: w.music.chordSeconds ?? 35 });
+  view3d?.setWorld({ rainRate: w.rain.rate ?? 5, windAmount: w.wind.amount ?? 0.3, sustain: w.chimes.sustain ?? 1, chordSeconds: w.music.chordSeconds ?? 35, layers: w.music.layers ?? 0, age: w.music.age ?? 0, texture: w.music.texture ?? 0, freeze: !!w.music.freeze });
 }
 
 async function togglePlay(): Promise<void> {
@@ -232,6 +232,16 @@ function sendScale(): void {
 }
 
 const RHYTHMS = ['free', 'loops', 'pulse'] as const;
+const VOICING_LABEL = { triad: 'triads', sus2: 'sus2 (open, unresolved)', sus4: 'sus4 (suspended)', add9: 'add9 (root, fifth, ninth)', quartal: 'quartal (stacked fourths)', open: 'open fifths + tenth' };
+
+/** The live processors, after how ambient artists perform (docs/AMBIENT-RESEARCH.md). */
+const PERFORM: SliderSpec[] = [
+  { id: 'perf-layers', label: 'Layers', min: 0, max: 1, step: 0.01, get: () => m().layers ?? 0, set: (v) => (m().layers = v), fmt: (v) => (v < 0.01 ? 'off' : v < 0.4 ? 'echoes' : v < 0.8 ? 'layers build' : 'near-endless') },
+  { id: 'perf-decay', label: 'Decay', min: 0, max: 1, step: 0.01, get: () => m().decay ?? 0.4, set: (v) => (m().decay = v), fmt: (v) => (v < 0.25 ? 'clean passes' : v < 0.6 ? 'darkening' : 'disintegrating') },
+  { id: 'perf-age', label: 'Age', min: 0, max: 1, step: 0.01, get: () => m().age ?? 0, set: (v) => (m().age = v), fmt: (v) => (v < 0.01 ? 'new' : v < 0.35 ? 'warm tape' : v < 0.7 ? 'worn cassette' : 'old reel') },
+  { id: 'perf-texture', label: 'Texture', min: 0, max: 1, step: 0.01, get: () => m().texture ?? 0, set: (v) => (m().texture = v), fmt: (v) => (v < 0.01 ? 'off' : v < 0.4 ? 'sparkle' : v < 0.75 ? 'grain cloud' : 'dense cloud') },
+  { id: 'perf-swell', label: 'Swell', min: 0, max: 1, step: 0.01, get: () => m().swell ?? 0, set: (v) => (m().swell = v), fmt: (v) => (v < 0.01 ? 'struck' : `fade-in ${(0.05 + v * v * 1.6).toFixed(1)} s`) },
+];
 const RHYTHM_LABEL = { free: 'free (no grid)', loops: 'loops (Eno-style)', pulse: 'pulse (on the beat)' };
 
 function purityWord(v: number): string {
@@ -252,6 +262,7 @@ function beatWord(v: number): string {
 const MACROS: SliderSpec[] = [
   { id: 'mood-light', label: 'Light', min: 0, max: 0.999, step: 0.001, get: () => key().light, set: (v) => { key().light = v; sendScale(); }, fmt: () => lightName(key()) },
   { id: 'mood-purity', label: 'Purity', min: 0, max: 1, step: 0.01, get: () => key().purity, set: (v) => { key().purity = v; m().detune = purityDetune(v); sendScale(); }, fmt: purityWord },
+  { id: 'mood-voicing', label: 'Voicing', min: 0, max: VOICING_ORDER.length - 1, step: 1, get: () => VOICING_ORDER.indexOf(m().voicing ?? 'triad'), set: (v) => (m().voicing = VOICING_ORDER[Math.round(v)]), fmt: (v) => VOICING_LABEL[VOICING_ORDER[Math.round(v)]] },
   { id: 'mood-warmth', label: 'Warmth', min: 0, max: 1, step: 0.01, get: () => 1 - (m().brightness ?? 0.4), set: (v) => (m().brightness = 1 - v), fmt: (v) => (v > 0.75 ? 'dark & warm' : v > 0.5 ? 'warm' : v > 0.25 ? 'clear' : 'bright') },
   { id: 'mood-space', label: 'Space', min: 0, max: 1, step: 0.01, get: () => state.space, set: (v) => { state.space = v; const sp = spacePatch(v); Object.assign(w().reverb, sp.reverb); w().mix.music.send = sp.send; m().shimmer = sp.shimmer; send({ reverb: w().reverb, mix: { music: { send: sp.send } } }); }, fmt: (v) => (v < 0.25 ? 'close' : v < 0.55 ? 'room' : v < 0.8 ? 'hall' : 'cathedral + shimmer') },
   { id: 'move-motion', label: 'Motion', min: 0, max: 30, step: 0.5, get: () => m().density ?? 8, set: (v) => (m().density = v), fmt: (v) => (v < 0.5 ? 'still' : `${v.toFixed(v < 10 ? 1 : 0)} notes/min`) },
@@ -265,6 +276,7 @@ const MACROS: SliderSpec[] = [
 const VOICES: [string, string, keyof typeof DEFAULT_MUSIC_PARAMS, string][] = [
   ['voice-drone', 'Drone', 'droneLevel', 'Harmonic series on the root. Only overtones that fit the key sound.'],
   ['voice-pad', 'Pad', 'padLevel', 'Detuned saws through a slowly breathing filter.'],
+  ['voice-piano', 'Piano', 'pianoLevel', 'Soft felt piano (after Harold Budd): quiet, dark, long.'],
   ['voice-bowls', 'Bowls', 'bowlsLevel', 'Singing bowls: each partial is a beating pair.'],
   ['voice-keys', 'Keys', 'keysLevel', 'FM e-piano / bell, wandering the scale.'],
   ['voice-plucks', 'Plucks', 'plucksLevel', 'Plucked strings (Karplus–Strong) arpeggiating the chord.'],
@@ -330,6 +342,13 @@ function buildStrips(): void {
   slider(mood.more, { id: 'music-send', label: 'Reverb send', min: 0, max: 1, step: 0.01, get: () => w().mix.music.send, set: (v) => (w().mix.music.send = v), fmt: pct }, mixChange('music'));
   slider(mood.more, { id: 'music-shimmer', label: 'Shimmer', min: 0, max: 1, step: 0.01, get: () => m().shimmer ?? 0, set: (v) => (m().shimmer = v), fmt: pct }, musicChange);
   slider(mood.more, { id: 'music-detune', label: 'Detune', min: 0, max: 60, step: 0.5, get: () => m().detune!, set: (v) => (m().detune = v), fmt: (v) => `${v.toFixed(1)} cents${v > 30 ? ' (seasick)' : ''}` }, musicChange);
+
+  const perf = strip(musicRoot, 'Perform', 'Live processors on the music: a sound-on-sound looper, tape age, a grain cloud and fade-in attacks. The beat stays out of the looper.', null);
+  for (const spec of PERFORM) slider(perf.main, spec, musicChange);
+  toggle(perf.main, 'music-freeze', 'Freeze: hold the loop forever (key F)', () => !!m().freeze, (v) => (m().freeze = v), () => { musicChange(); changed('music-freeze'); });
+  slider(perf.more, { id: 'music-loop', label: 'Loop length', min: 2, max: 24, step: 0.1, get: () => m().loopSeconds ?? 11.3, set: (v) => (m().loopSeconds = v), fmt: (v) => `${v.toFixed(1)} s` }, musicChange);
+  slider(perf.more, { id: 'music-orbit', label: 'Orbit (drone and bowls circle in stereo)', min: 0, max: 1, step: 0.01, get: () => m().orbit ?? 0, set: (v) => (m().orbit = v), fmt: (v) => (v < 0.01 ? 'still' : pct(v)) }, musicChange);
+  toggle(perf.more, 'music-pedal', 'Pedal: hold the bass on the root while chords move', () => !!m().pedal, (v) => (m().pedal = v), musicChange);
 
   const inst = strip(musicRoot, 'Instruments', 'Mix the ensemble. Set a voice to zero to take it out.', null);
   for (const [id, label, prop, blurb] of VOICES) {
@@ -409,6 +428,12 @@ function buildStrips(): void {
   slider(space, { id: 'rev-t60', label: 'Reverb length', min: 0.5, max: 20, log: true, get: () => w().reverb.t60!, set: (v) => (w().reverb.t60 = v), fmt: (v) => `${v.toFixed(1)} s` }, ch);
   slider(space, { id: 'rev-damp', label: 'Reverb darkness', min: 0, max: 1, step: 0.01, get: () => w().reverb.damping!, set: (v) => (w().reverb.damping = v), fmt: pct }, ch);
   slider(space, { id: 'rev-size', label: 'Space size', min: 0.5, max: 2, step: 0.01, get: () => w().reverb.size!, set: (v) => (w().reverb.size = v), fmt: times }, ch);
+}
+
+function toggleFreeze(): void {
+  m().freeze = !m().freeze;
+  musicChange();
+  changed('music-freeze');
 }
 
 function blendWord(v: number): string {
@@ -514,10 +539,11 @@ try {
 // ------------------------------------------------------------------ dials
 
 /** Dial clusters floating in the scene. Music clusters sit around the object; ambience below it. */
-const CLUSTERS: { id: string; title: string; layer: LayerId; hue: number; power?: LayerId; small?: boolean; dials: string[]; labels?: Record<string, string> }[] = [
-  { id: 'mood', title: 'Mood', layer: 'music', hue: 318, power: 'music', dials: ['mood-light', 'mood-purity', 'mood-warmth', 'mood-space'] },
+const CLUSTERS: { id: string; title: string; layer: LayerId; hue: number; power?: LayerId; freeze?: boolean; small?: boolean; dials: string[]; labels?: Record<string, string> }[] = [
+  { id: 'mood', title: 'Mood', layer: 'music', hue: 318, power: 'music', dials: ['mood-light', 'mood-purity', 'mood-voicing', 'mood-warmth', 'mood-space'] },
+  { id: 'perf', title: 'Perform', layer: 'music', hue: 38, freeze: true, dials: ['perf-layers', 'perf-decay', 'perf-age', 'perf-texture', 'perf-swell'] },
   { id: 'move', title: 'Movement', layer: 'music', hue: 285, dials: ['move-motion', 'move-breath', 'move-rhythm', 'move-tempo', 'move-beat'] },
-  { id: 'inst', title: 'Instruments', layer: 'music', hue: 340, small: true, dials: ['voice-drone', 'voice-pad', 'voice-bowls', 'voice-keys', 'voice-plucks', 'voice-choir'] },
+  { id: 'inst', title: 'Instruments', layer: 'music', hue: 340, small: true, dials: ['voice-drone', 'voice-pad', 'voice-piano', 'voice-bowls', 'voice-keys', 'voice-plucks', 'voice-choir'] },
   { id: 'amb', title: 'Ambience', layer: 'rain', hue: 172, dials: ['bus-blend', 'rain-rate', 'wind-amount', 'chimes-level'], labels: { 'wind-amount': 'Wind', 'chimes-level': 'Chimes' } },
 ];
 const clusters: { id: string; el: HTMLElement }[] = [];
@@ -555,6 +581,19 @@ function buildDials(): void {
       });
       head.append(power);
     }
+    if (cl.freeze) {
+      const fz = document.createElement('button');
+      fz.className = 'cpower freeze';
+      fz.id = 'freeze-btn';
+      fz.title = 'Hold the loop forever (F)';
+      fz.addEventListener('click', toggleFreeze);
+      addSync('music-freeze', () => {
+        const on = !!m().freeze;
+        fz.setAttribute('aria-pressed', String(on));
+        fz.textContent = on ? 'Frozen' : 'Freeze';
+      });
+      head.append(fz);
+    }
     const row = document.createElement('div');
     row.className = 'dial-row';
     for (const id of cl.dials) {
@@ -579,7 +618,8 @@ function buildDials(): void {
 /** Float each cluster at its anchor in the scene, kept inside the viewport and clear of the top bar. */
 function placeDials(): void {
   requestAnimationFrame(placeDials);
-  const docked = !view3d || window.innerWidth < 820 || window.innerHeight < 520;
+  // Five clusters need room to float; below that they dock into a sheet.
+  const docked = !view3d || window.innerWidth < 1100 || window.innerHeight < 600;
   document.body.classList.toggle('docked', docked);
   if (docked || !view3d) {
     clusters.forEach(({ el }) => (el.style.transform = ''));
@@ -588,13 +628,18 @@ function placeDials(): void {
   const top = $('top').getBoundingClientRect().bottom + 12;
   const W = window.innerWidth;
   const H = window.innerHeight;
+  const placed: { x: number; y: number; w: number; h: number }[] = [];
+  const hits = (r: { x: number; y: number; w: number; h: number }) =>
+    placed.find((o) => r.x < o.x + o.w && o.x < r.x + r.w && r.y < o.y + o.h && o.y < r.y + r.h);
   for (const { id, el } of clusters) {
     const a = view3d.anchor(id);
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const x = Math.min(W - 16 - w, Math.max(16, a.x - w / 2));
-    const y = Math.min(H - 40 - h, Math.max(top, a.y - h / 2));
-    el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+    const r = { x: Math.min(W - 16 - w, Math.max(16, a.x - w / 2)), y: Math.min(H - 40 - h, Math.max(top, a.y - h / 2)), w, h };
+    // If it lands on a cluster already placed, lift it clear (the scene has room above).
+    for (let k = 0, o = hits(r); o && k < 4; k++, o = hits(r)) r.y = Math.max(top, o.y - h - 8);
+    placed.push(r);
+    el.style.transform = `translate3d(${r.x.toFixed(1)}px, ${r.y.toFixed(1)}px, 0)`;
   }
 }
 
@@ -668,6 +713,9 @@ function init(): void {
   });
   window.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement;
+    // F freezes from anywhere except text entry (dials are range inputs, so it works there too).
+    const typing = t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && (t as HTMLInputElement).type !== 'range' && (t as HTMLInputElement).type !== 'checkbox');
+    if ((e.key === 'f' || e.key === 'F') && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) { toggleFreeze(); return; }
     if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'SUMMARY'].includes(t.tagName)) return;
     if (e.key === ' ') {
       e.preventDefault();

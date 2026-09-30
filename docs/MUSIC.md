@@ -36,11 +36,35 @@ Status: built 2026-09-28, **not yet heard by the user**. Levels are matched by m
 
 Measured solo levels at voice level 1 (30 s renders, RMS dBFS before the world gain): pad −32, keys −29, drone −35, bowls −38, plucks −49 (sparse; peaks −14), choir −34, beat −34. Everything together: about −25 dBFS RMS, −10 dB peak, **4.7% of one CPU core** in Node (the worklet adds the nature layers on top).
 
+## Perform: the live processors (added after docs/AMBIENT-RESEARCH.md)
+
+Pro live ambient is mostly a *system* (loops, tape, grains) that a player feeds and steers. These now sit on the tonal music bus. The beat bypasses the looper and grains but goes through tape. Code: `src/audio/music/fx.ts`.
+
+| Dial | Technique | After |
+|---|---|---|
+| Layers | Sound-on-sound: a 2–24 s delay (Loop length, default 11.3 s) fed back and re-recorded with the new input; feedback 0.4–0.97 | Fripp & Eno's Frippertronics, loopers |
+| Decay | Loss per pass: low-pass 14 kHz → 1.7 kHz, 60 Hz high-pass, soft saturation, a little wow | Basinski's disintegrating tape |
+| Freeze (button, key F) | Loop held forever, no loss, input muted; voices keep playing over it | Looper hold, reverb freeze |
+| Age | Wow (±10 cents), flutter, saturation, falling top end, hiss, dropouts; on dry and wet alike | Chase Bliss Generation Loss, cassettes |
+| Texture | Up to 28 grains/s from the last ~3 s, 80–400 ms, pitched unison, octave up/down or a fifth, scattered in stereo | Hologram Microcosm, Mutable Clouds |
+| Swell | Fade-in attacks (0.05–1.65 s) on keys, plucks and piano | Guitar volume swells, EBow (Stars of the Lid) |
+| Orbit (Advanced) | Drone partials and bowls circle slowly through the stereo field, in both directions | Suzanne Ciani's quad Buchla |
+
+Also new:
+- **Piano:** a "soft pedal" felt piano after Harold Budd. Six inharmonic partials, the lower two as beating string pairs, dark at low velocity, long decays, occasional dyads.
+- **Voicing** (Mood dial): triads, sus2, sus4, add9, quartal, open fifths.
+- **Pedal** (Advanced): the pad's bass holds the key root while the chords move.
+
+In the visuals: Layers lengthens the trails, Freeze nearly stops time (the attractor and rotation slow), Age adds film grain and fades the colour, and Texture brightens the particle core.
+
+Measured (30 s renders): everything plus all processors comes to 8.5% of one core in Node, peak −10.7 dBFS. The piano solo peaks at about −15 dBFS.
+
 ## Dials
 
 - **Mood:** Light (Phrygian → Aeolian → Dorian → Mixolydian → Ionian → Lydian on one root; pentatonic flavours in that family), Purity (just ↔ equal ↔ detuned; also sets pad/choir detune), Warmth (overall brightness), Space (reverb length/size, music send, shimmer).
 - **Movement:** Motion (notes per minute), Breath (rests between phrases, 0.15× to 2.75× the phrase length), Rhythm (free / loops / pulse), Tempo (40–100 BPM), Beat (off → heartbeat → brushes → soft lo-fi kit). Evolve (chord change rate) is in Advanced.
-- **Instruments:** a level per voice.
+- **Instruments:** a level per voice (Drone, Pad, Piano, Bowls, Keys, Plucks, Choir).
+- **Perform:** Layers, Decay, Age, Texture, Swell, plus Freeze.
 - **Key:** root and family (modes, pentatonic, harmonic series, whole tone, 19-EDO, cluster) in the top bar; 432 Hz and binaural under Advanced → Tuning extras.
 
 ## Vibes

@@ -115,7 +115,7 @@ export const SCENES: Scene[] = [
     bus: { blend: 0.55 },
     rain: { rate: 1.5, surfaceMix: surfaces({ water: 0.9, leaves: 0.2 }) },
     wind: { amount: 0.2 },
-    music: { droneLevel: 1, padLevel: 0.8, bowlsLevel: 0.6, keysLevel: 0.3, plucksLevel: 0, choirLevel: 0.3, density: 4, breath: 0.8, brightness: 0.25, rhythm: 'free', beat: 0, chordSeconds: 60, ring: 1.4 },
+    music: { droneLevel: 1, padLevel: 0.7, pianoLevel: 0.7, bowlsLevel: 0.5, keysLevel: 0, plucksLevel: 0, choirLevel: 0.25, density: 4, breath: 0.8, brightness: 0.25, rhythm: 'free', beat: 0, chordSeconds: 60, ring: 1.4, voicing: 'open', layers: 0.45, decay: 0.45, age: 0.15, texture: 0.1, swell: 0.25, orbit: 0.5 },
   },
   {
     label: 'Temple',
@@ -124,7 +124,7 @@ export const SCENES: Scene[] = [
     mix: { rain: off, wind: on(0.4), chimes: on(0.8), music: on() },
     wind: { amount: 0.35, gustiness: 0.5 },
     chimes: { tubes: 6, sustain: 2 },
-    music: { droneLevel: 1, bowlsLevel: 1, choirLevel: 0.6, padLevel: 0.3, keysLevel: 0, plucksLevel: 0.2, density: 6, breath: 0.7, brightness: 0.35, rhythm: 'loops', beat: 0, ring: 1.6 },
+    music: { droneLevel: 1, bowlsLevel: 1, choirLevel: 0.6, padLevel: 0.3, keysLevel: 0, plucksLevel: 0.2, density: 6, breath: 0.7, brightness: 0.35, rhythm: 'loops', beat: 0, ring: 1.6, voicing: 'quartal', texture: 0.3, orbit: 0.7, layers: 0.3 },
   },
   {
     label: 'Morning light',
@@ -132,7 +132,7 @@ export const SCENES: Scene[] = [
     space: 0.5,
     mix: { rain: off, wind: on(0.5), chimes: on(0.7), music: on() },
     wind: { amount: 0.4 },
-    music: { plucksLevel: 0.9, keysLevel: 0.7, padLevel: 0.6, droneLevel: 0.4, choirLevel: 0, bowlsLevel: 0.3, density: 12, breath: 0.4, brightness: 0.6, rhythm: 'loops', beat: 0 },
+    music: { plucksLevel: 0.9, keysLevel: 0.5, pianoLevel: 0.5, padLevel: 0.6, droneLevel: 0.4, choirLevel: 0, bowlsLevel: 0.3, density: 12, breath: 0.4, brightness: 0.6, rhythm: 'loops', beat: 0, voicing: 'add9', layers: 0.35, decay: 0.3, texture: 0.25 },
   },
   {
     label: 'Rain study (lo-fi)',
@@ -141,7 +141,7 @@ export const SCENES: Scene[] = [
     mix: { rain: on(1.2), wind: on(0.3), chimes: off, music: on() },
     rain: { rate: 6, surfaceMix: surfaces({ glass: 0.6, leaves: 0.5, water: 0.2 }) },
     wind: { amount: 0.25 },
-    music: { keysLevel: 1, keysRatio: 2, padLevel: 0.7, plucksLevel: 0.4, droneLevel: 0.2, choirLevel: 0, bowlsLevel: 0, beat: 0.75, tempo: 72, swing: 0.6, rhythm: 'pulse', density: 10, breath: 0.45, brightness: 0.35 },
+    music: { keysLevel: 0.9, keysRatio: 2, pianoLevel: 0.6, padLevel: 0.7, plucksLevel: 0.3, droneLevel: 0.2, choirLevel: 0, bowlsLevel: 0, beat: 0.75, tempo: 72, swing: 0.6, rhythm: 'pulse', density: 10, breath: 0.45, brightness: 0.35, voicing: 'add9', age: 0.5, layers: 0.2 },
   },
   {
     label: 'Night drift',
@@ -150,7 +150,7 @@ export const SCENES: Scene[] = [
     mix: { rain: on(0.8), wind: on(0.45), chimes: off, music: on() },
     rain: { rate: 2, surfaceMix: surfaces({ tin: 0.5, leaves: 0.5 }) },
     wind: { amount: 0.45 },
-    music: { choirLevel: 0.7, padLevel: 1, droneLevel: 0.6, keysLevel: 0.4, plucksLevel: 0.3, bowlsLevel: 0.2, beat: 0.2, tempo: 56, rhythm: 'free', density: 5, breath: 0.7, brightness: 0.2 },
+    music: { choirLevel: 0.7, padLevel: 1, droneLevel: 0.6, keysLevel: 0.3, plucksLevel: 0.3, bowlsLevel: 0.2, beat: 0.2, tempo: 56, rhythm: 'free', density: 5, breath: 0.7, brightness: 0.2, voicing: 'sus2', layers: 0.55, decay: 0.6, age: 0.3, swell: 0.5 },
   },
   {
     label: 'Floating',
@@ -158,7 +158,7 @@ export const SCENES: Scene[] = [
     space: 1,
     mix: { rain: off, wind: on(0.35), chimes: off, music: on() },
     wind: { amount: 0.2 },
-    music: { padLevel: 0.8, choirLevel: 0.5, bowlsLevel: 0.6, keysLevel: 0.4, droneLevel: 0.5, plucksLevel: 0.2, density: 6, breath: 0.6, brightness: 0.4, rhythm: 'loops', beat: 0 },
+    music: { padLevel: 0.8, choirLevel: 0.5, bowlsLevel: 0.6, keysLevel: 0.4, droneLevel: 0.5, plucksLevel: 0.2, density: 6, breath: 0.6, brightness: 0.4, rhythm: 'loops', beat: 0, layers: 0.6, decay: 0.35, texture: 0.6, orbit: 0.9, swell: 0.6 },
   },
   {
     label: 'Storm shelter',
@@ -170,7 +170,7 @@ export const SCENES: Scene[] = [
     rain: { rate: 45, surfaceMix: surfaces({ leaves: 1, water: 0.5, tin: 0.3, grass: 0.3 }) },
     wind: { amount: 0.85, gustiness: 0.9, whistle: 0.6, rustle: 0.7 },
     chimes: { activity: 1.5 },
-    music: { droneLevel: 1, padLevel: 0.9, choirLevel: 0.3, keysLevel: 0, plucksLevel: 0.2, bowlsLevel: 0.4, density: 3, breath: 0.8, brightness: 0.2, chordSeconds: 50, beat: 0 },
+    music: { droneLevel: 1, padLevel: 0.9, choirLevel: 0.3, keysLevel: 0, plucksLevel: 0.2, pianoLevel: 0.4, bowlsLevel: 0.4, density: 3, breath: 0.8, brightness: 0.2, chordSeconds: 50, beat: 0, voicing: 'sus4', pedal: true, age: 0.15, layers: 0.3 },
   },
   {
     label: 'Strange weather',
@@ -181,7 +181,7 @@ export const SCENES: Scene[] = [
     rain: { rate: 4, surfaceMix: surfaces({ bells: 0.6, water: 0.5 }), grid: { enabled: true, bpm: 70, division: 3 }, bubbleGlide: 1.2 },
     wind: { amount: 0.6, tone: -0.7, whistle: 1 },
     chimes: { sustain: 3, brightness: 1 },
-    music: { keysRatio: 3.7, density: 14, bowlsLevel: 0.8, plucksLevel: 0.5, choirLevel: 0.4, rhythm: 'loops' },
+    music: { keysRatio: 3.7, density: 14, bowlsLevel: 0.8, plucksLevel: 0.5, choirLevel: 0.4, rhythm: 'loops', texture: 0.5, age: 0.5, layers: 0.45, decay: 0.7, orbit: 0.6 },
     reverb: { damping: 0.3 },
   },
   {

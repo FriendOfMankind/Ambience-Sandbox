@@ -20,10 +20,24 @@
 
 import { createRng, type Rng } from '../../core/rng';
 import { scaleStepHz, type ScaleSnap } from './scales';
-import { Beat, Bowls, Choir, Drone, Plucks, Shimmer, saw } from './voices';
+import { Beat, Bowls, Choir, Drone, Piano, Plucks, Shimmer, saw } from './voices';
+import { Granular, Looper, Tape } from './fx';
 
 export type Rhythm = 'free' | 'loops' | 'pulse';
-export type MusicVoice = 'keys' | 'pluck' | 'bowl';
+export type MusicVoice = 'keys' | 'pluck' | 'bowl' | 'piano';
+export type Voicing = 'triad' | 'sus2' | 'sus4' | 'add9' | 'quartal' | 'open';
+
+/** Chord shapes as scale steps above the chord root (scale-agnostic: in a 7-note scale these
+ *  are the named chords; in other scales they are their nearest cousins). */
+export const VOICINGS: Record<Voicing, [number, number, number]> = {
+  triad: [0, 2, 4],
+  sus2: [0, 1, 4],
+  sus4: [0, 3, 4],
+  add9: [0, 4, 8],
+  quartal: [0, 3, 6],
+  open: [0, 4, 9],
+};
+export const VOICING_ORDER: Voicing[] = ['triad', 'sus2', 'sus4', 'add9', 'quartal', 'open'];
 
 export interface MusicParams {
   padLevel: number;
@@ -62,6 +76,27 @@ export interface MusicParams {
   binaural: number;
   /** Binaural beat frequency in Hz. */
   binauralHz: number;
+  pianoLevel: number;
+  /** Chord shape for pad and choir. */
+  voicing: Voicing;
+  /** Hold the pad's bass on the key's root while the chords move above it. */
+  pedal: boolean;
+  /** Sound-on-sound looper: 0 off, up to 1 = layers last a long time. */
+  layers: number;
+  /** How much each loop pass loses (darker, wobblier), 0..1. */
+  decay: number;
+  /** Loop length in seconds (2..24). */
+  loopSeconds: number;
+  /** Hold the loop forever and stop recording into it. */
+  freeze: boolean;
+  /** Tape age: wow, flutter, saturation, hiss, dropouts, 0..1. */
+  age: number;
+  /** Granular cloud from the last few seconds, 0..1. */
+  texture: number;
+  /** Fade-in attacks for keys, plucks and piano, 0..1. */
+  swell: number;
+  /** Slow circling of the drone's partials and the bowls through the stereo field, 0..1. */
+  orbit: number;
   scale: ScaleSnap;
 }
 
@@ -100,6 +135,17 @@ export const DEFAULT_MUSIC_PARAMS: MusicParams = {
   shimmer: 0.3,
   binaural: 0,
   binauralHz: 6,
+  pianoLevel: 0,
+  voicing: 'triad',
+  pedal: false,
+  layers: 0,
+  decay: 0.4,
+  loopSeconds: 11.3,
+  freeze: false,
+  age: 0,
+  texture: 0,
+  swell: 0,
+  orbit: 0,
   scale: { enabled: true, rootHz: 146.83, cents: [0, 300, 500, 700, 1000], periodCents: 1200 },
 };
 
@@ -173,6 +219,10 @@ export class MusicSynth {
   private readonly choir: Choir;
   private readonly beatKit: Beat;
   private readonly shimmerFx: Shimmer;
+  private readonly piano: Piano;
+  private readonly looper: Looper;
+  private readonly tape: Tape;
+  private readonly grains: Granular;
   private readonly vL = new Float32Array(BLOCK_MAX);
   private readonly vR = new Float32Array(BLOCK_MAX);
   private readonly pL = new Float32Array(BLOCK_MAX);
@@ -210,11 +260,16 @@ export class MusicSynth {
     this.choir = new Choir(fs, createRng(seed, 'music.choir'));
     this.beatKit = new Beat(fs, createRng(seed, 'music.beat'));
     this.shimmerFx = new Shimmer(fs);
+    this.piano = new Piano(fs, createRng(seed, 'music.piano'));
+    this.looper = new Looper(fs);
+    this.tape = new Tape(fs, createRng(seed, 'music.tape'));
+    this.grains = new Granular(fs, createRng(seed, 'music.grains'));
     const n = () => this.p.scale.cents.length;
     this.players = [
       { voice: 'keys', rate: 1, gated: true, nextIn: 0, loops: [], loopSeconds: [17.3, 21.1, 25.7], degrees: [0, 1, 2, 3, 4, 6], register: () => n() * this.p.keysOctave },
       { voice: 'pluck', rate: 1.3, gated: true, nextIn: 0, loops: [], loopSeconds: [13.9, 19.3, 23.5], degrees: [0, 2, 4, 7], register: () => n() * 2 },
       { voice: 'bowl', rate: 0.22, gated: false, nextIn: 0, loops: [], loopSeconds: [19.9, 27.1], degrees: [0, 4], register: () => n() },
+      { voice: 'piano', rate: 0.45, gated: true, nextIn: 0, loops: [], loopSeconds: [15.7, 22.3, 31.1], degrees: [0, 2, 4, 6], register: () => n() * 2 },
     ];
     this.setParams(params ?? {});
     for (let v = 0; v < PAD_VOICES; v++) {
@@ -242,7 +297,8 @@ export class MusicSynth {
     this.p = { ...this.p, ...patch, scale: { ...this.p.scale, ...(patch.scale ?? {}) } };
     this.drone.setScale(this.droneRoot(), this.p.scale.cents);
     // Re-voice the current chord in the new scale; the glide makes the change smooth.
-    if (scaleChanged && this.padTarget.length) this.applyChord(false);
+    const revoice = patch.voicing !== undefined || patch.pedal !== undefined;
+    if ((scaleChanged || revoice) && this.padTarget.length) this.applyChord(false, !scaleChanged);
   }
 
   drainEvents(): MusicEvent[] {
@@ -264,20 +320,26 @@ export class MusicSynth {
     return this.rng.range(mean * 0.6, mean * 1.4) * this.fs;
   }
 
-  /** Voice a chord on scale steps chordStep, +2, +4 (stacked "thirds" in any scale). */
-  private applyChord(snap: boolean): void {
+  /** Voice the chord on its root with the chosen shape (triad, sus, add9, quartal, open). */
+  private applyChord(snap: boolean, silent = false): void {
     const n = this.p.scale.cents.length;
     // Keep the chord root in the lowest octave or two.
     this.chordStep = ((this.chordStep % n) + n) % n;
-    const steps = [this.chordStep, this.chordStep + 2, this.chordStep + 4];
+    const shape = VOICINGS[this.p.voicing] ?? VOICINGS.triad;
+    const steps = shape.map((d) => this.chordStep + d);
+    if (this.p.pedal) {
+      // Pedal: the bass stays on the key's root; the chord's upper voices move above it.
+      steps[0] = 0;
+      for (let i = 1; i < steps.length; i++) if (steps[i] <= 0) steps[i] += n;
+    }
     for (let v = 0; v < PAD_VOICES; v++) {
       const f = scaleStepHz(this.p.scale, steps[v]);
       this.padTarget[v] = f;
       if (snap || this.padFreq[v] === 0) this.padFreq[v] = f;
     }
     // The choir sings the same chord an octave up, opened out.
-    this.choir.setChord([steps[0] + n, steps[1] + n, steps[2] + n].map((s) => scaleStepHz(this.p.scale, s)));
-    this.events.push({ kind: 'chord', frame: this.frame, hz: this.padTarget[0], velocity: 1, step: this.chordStep });
+    this.choir.setChord(shape.map((d) => scaleStepHz(this.p.scale, this.chordStep + d + n)));
+    if (!silent) this.events.push({ kind: 'chord', frame: this.frame, hz: scaleStepHz(this.p.scale, this.chordStep), velocity: 1, step: this.chordStep });
   }
 
   private nextChord(): void {
@@ -289,7 +351,7 @@ export class MusicSynth {
   }
 
   private voiceLevel(v: MusicVoice): number {
-    return v === 'keys' ? this.p.keysLevel : v === 'pluck' ? this.p.plucksLevel : this.p.bowlsLevel;
+    return v === 'keys' ? this.p.keysLevel : v === 'pluck' ? this.p.plucksLevel : v === 'piano' ? this.p.pianoLevel : this.p.bowlsLevel;
   }
 
   /** Notes per second for one player, including the slow breath. */
@@ -323,6 +385,11 @@ export class MusicSynth {
       const i = ((this.arpIdx % tones.length) + tones.length) % tones.length;
       return pl.register() + this.chordStep + tones[i];
     }
+    if (pl.voice === 'piano') {
+      // Budd-like: mostly chord tones, sometimes the note beside one, in the middle register.
+      const tones = [0, 2, 4, 6, 7];
+      return pl.register() + this.chordStep + this.rngComp.pick(tones) + (this.rngComp.chance(0.2) ? 1 : 0);
+    }
     return pl.register() + this.chordStep + (this.rngComp.chance(0.65) ? 0 : 4);
   }
 
@@ -330,8 +397,18 @@ export class MusicSynth {
     const f = scaleStepHz(this.p.scale, step);
     if (f >= this.fs * 0.2) return;
     const ring = this.p.ring;
+    const attack = this.p.swell > 0.01 ? 0.05 + this.p.swell * this.p.swell * 1.6 : 0;
     if (pl.voice === 'keys') this.startKeys(f, velocity);
-    else if (pl.voice === 'pluck') this.plucks.pluck(f, velocity, this.p.brightness, ring);
+    else if (pl.voice === 'pluck') this.plucks.pluck(f, velocity, this.p.brightness, ring, attack);
+    else if (pl.voice === 'piano') {
+      // Soft: quiet, dark velocities; now and then a dyad with a chord tone above.
+      const vel = 0.3 + velocity * 0.45;
+      this.piano.strike(f, vel, ring, attack);
+      if (this.rngComp.chance(0.3)) {
+        const f2 = scaleStepHz(this.p.scale, step + (this.rngComp.chance(0.5) ? 2 : 4));
+        this.piano.strike(f2, vel * 0.7, ring, attack);
+      }
+    }
     else this.bowls.strike(f, velocity, ring);
     this.events.push({ kind: 'note', voice: pl.voice, frame: this.frame, hz: f, velocity, step });
   }
@@ -474,6 +551,7 @@ export class MusicSynth {
     const dA = Math.round(0.47 * fs);
     const dB = Math.round(0.71 * fs);
     const dLp = Math.exp((-2 * Math.PI * 3200) / fs);
+    const keysAttackInc = 1 / ((0.004 + (p.swell > 0.01 ? 0.05 + p.swell * p.swell * 1.6 : 0)) * fs);
 
     // Plucks go through the keys' delay too, so they render first.
     const pL = this.pL, pR = this.pR;
@@ -531,7 +609,7 @@ export class MusicSynth {
         this.kPhaseC[v] += f / fs;
         if (this.kPhaseC[v] >= 1) this.kPhaseC[v] -= 1;
         const mod = Math.sin(2 * Math.PI * this.kPhaseM[v]) * this.kIndex[v];
-        this.kAttack[v] = Math.min(1, this.kAttack[v] + 1 / (0.004 * fs));
+        this.kAttack[v] = Math.min(1, this.kAttack[v] + keysAttackInc);
         const s = Math.sin(2 * Math.PI * this.kPhaseC[v] + mod) * this.kAmp[v] * this.kAttack[v];
         this.kAmp[v] *= this.kAmpMul[v];
         this.kIndex[v] *= this.kIndexMul[v];
@@ -561,8 +639,9 @@ export class MusicSynth {
     const vL = this.vL, vR = this.vR;
     vL.fill(0, 0, frames);
     vR.fill(0, 0, frames);
-    this.drone.process(vL, vR, frames, p.droneLevel, p.binaural, p.binauralHz);
-    this.bowls.process(vL, vR, frames, p.bowlsLevel);
+    this.drone.process(vL, vR, frames, p.droneLevel, p.binaural, p.binauralHz, p.orbit);
+    this.bowls.process(vL, vR, frames, p.bowlsLevel, p.orbit);
+    this.piano.process(vL, vR, frames, p.pianoLevel, p.brightness);
     this.choir.process(vL, vR, frames, p.choirLevel, p.detune);
     // ---- beat: dry, a touch of room
     const bL = this.bL, bR = this.bR;
@@ -570,14 +649,25 @@ export class MusicSynth {
     bR.fill(0, 0, frames);
     this.beatKit.process(bL, bR, frames, p.beat, p.tempo, p.swing, p.brightness);
     for (const h of this.beatKit.hits) this.events.push({ kind: 'beat', frame: this.frame + h.offset, hz: 0, velocity: h.vel, step: h.kind });
+    for (let n = 0; n < frames; n++) {
+      outL[n] += vL[n];
+      outR[n] += vR[n];
+      sendL[n] += vL[n] * 0.9;
+      sendR[n] += vR[n] * 0.9;
+    }
+    // ---- live processors on the tonal music (the beat stays out of the loop and the grains)
+    this.grains.process(outL, outR, outL, outR, sendL, sendR, frames, p.texture);
+    this.looper.process(outL, outR, outL, outR, sendL, sendR, frames, p.layers, p.decay, p.freeze, p.loopSeconds);
     const bg = p.beatLevel;
     for (let n = 0; n < frames; n++) {
-      outL[n] += vL[n] + bL[n] * bg;
-      outR[n] += vR[n] + bR[n] * bg;
-      sendL[n] += vL[n] * 0.9 + bL[n] * bg * 0.08;
-      sendR[n] += vR[n] * 0.9 + bR[n] * bg * 0.08;
+      outL[n] += bL[n] * bg;
+      outR[n] += bR[n] * bg;
+      sendL[n] += bL[n] * bg * 0.08;
+      sendR[n] += bR[n] * bg * 0.08;
     }
     this.shimmerFx.process(sendL, sendR, frames, p.shimmer);
+    // Tape last: it ages everything, beat included, dry and wet alike.
+    this.tape.process(outL, outR, sendL, sendR, frames, p.age);
 
     if (!Number.isFinite(this.filtL[1]) || !Number.isFinite(this.dlLp) || !Number.isFinite(sendL[0])) this.resetState(outL, outR, sendL, sendR, frames);
     this.frame += frames;

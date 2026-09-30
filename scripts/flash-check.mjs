@@ -24,7 +24,7 @@ const scenarios = [
   { name: 'note spam (8 notes/s) + chord every 1.5 s', trip: 0.6, notes: 8, chord: 1.5 },
   { name: 'downpour (40 near drops per step)', trip: 0.6, rain: 40 },
   { name: 'lo-fi kick at 100 BPM + 4 bowl strikes/s', trip: 0.6, kicks: 100 / 60, bowls: 4 },
-  { name: 'everything at once, Trip 100 (kaleidoscope on)', trip: 1, chimes: 12, notes: 8, chord: 1.5, rain: 40, kicks: 100 / 60, bowls: 4 },
+  { name: 'everything at once, Trip 100 (kaleidoscope on), Layers/Age/Texture max, frozen', fx: true, trip: 1, chimes: 12, notes: 8, chord: 1.5, rain: 40, kicks: 100 / 60, bowls: 4 },
   { name: 'everything at once, reduced motion', trip: 0.6, chimes: 12, notes: 8, chord: 1.5, rain: 40, kicks: 100 / 60, bowls: 4, reduced: true },
 ];
 
@@ -45,7 +45,7 @@ for (const sc of scenarios) {
     v.measureEveryProbe(true);
     v.setTrip(sc.trip);
     v.setReduced(!!sc.reduced);
-    v.setWorld({ rainRate: sc.rain ? 80 : 2, windAmount: 0.8, sustain: 1, chordSeconds: 10 });
+    v.setWorld({ rainRate: sc.rain ? 80 : 2, windAmount: 0.8, sustain: 1, chordSeconds: 10, layers: sc.fx ? 1 : 0, age: sc.fx ? 1 : 0, texture: sc.fx ? 1 : 0, freeze: !!sc.fx });
     v.step(DT);
   }, { sc, DT });
   const steps = Math.round(SECONDS / DT);
