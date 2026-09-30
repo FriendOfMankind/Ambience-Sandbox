@@ -2,7 +2,9 @@
 
 Where things stand, so the next session can pick up without re-reading the whole chat.
 
-## Start here: the Perform processors are built (looper, tape Age, grains, Swell, Freeze, Orbit, piano, voicings); nothing new has been heard
+## Start here: world v2 phase 1 is built (docs/VISUALS.md → World v2); get the user's reaction, then Phase 2 (vegetation)
+
+## Before that: the Perform processors are built (looper, tape Age, grains, Swell, Freeze, Orbit, piano, voicings); nothing new has been heard
 
 After researching how ambient is made and played live (docs/AMBIENT-RESEARCH.md), the user said "let's implement this research". All seven gaps are built; see docs/MUSIC.md → Perform. The user still hasn't reported listening to music v2 either. Get listening feedback before adding more.
 

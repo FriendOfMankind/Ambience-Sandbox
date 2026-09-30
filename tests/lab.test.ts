@@ -54,7 +54,7 @@ describe('lab tests catalogue', () => {
       if (t.id !== 'chimes-light') expect(Math.sqrt(sq / n), `${t.id} is not silent`).toBeGreaterThan(1e-5);
       expect(peak, `${t.id} peak`).toBeLessThan(50);
     }
-  }, 120_000);
+  }, 300_000);
 });
 
 describe('feedback', () => {

@@ -25,14 +25,15 @@ page.on('console', (m) => { if (m.type() === 'error') console.log('console', m.t
 await page.route('http://localhost:4173/**', (r) => r.fulfill({ contentType: 'text/html', body: html }));
 await page.goto('http://localhost:4173/');
 await page.waitForFunction(() => window.__tarnVisual);
-await page.evaluate(({ trip, showUi, hide, scale }) => {
+await page.evaluate(({ trip, showUi, hide, scale, theta }) => {
   const v = window.__tarnVisual;
   v.pinScale(Number(scale));
   v.setTrip(trip);
   if (hide) v.hide(hide.split(','));
+  if (theta) v.teleport(Number(theta));
   v.setWorld({ rainRate: 12, windAmount: 0.5, sustain: 1.2, chordSeconds: 20 });
   if (!showUi) document.querySelectorAll('#top, #dials, .status').forEach((e) => (e.style.visibility = 'hidden'));
-}, { trip, showUi, hide: process.env.HIDE ?? '', scale: process.env.SCALE ?? 1 });
+}, { trip, showUi, hide: process.env.HIDE ?? '', scale: process.env.SCALE ?? 1, theta: process.env.THETA ?? '' });
 
 /** A plausible 8 s of the world: a chord, notes every ~0.7 s, chimes, light rain. */
 const shots = (process.env.SHOTS ?? '40,90,160').split(',').map(Number);

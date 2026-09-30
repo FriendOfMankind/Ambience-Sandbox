@@ -27,6 +27,7 @@ import type { SurfaceId } from '../../src/audio/nature/rain/surfaces';
 import { FlashMeter, type FlashReport } from './flash';
 import * as S from './shaders';
 import { pitchHue } from './view';
+import { World, type Quality } from './world';
 
 
 /** Hue of each layer's controls and edit glow (degrees). */
@@ -49,28 +50,27 @@ const TUBES_MAX = 8;
 const NODES = 12;
 const RIPPLES = 48;
 const SIM = 256;
-const OBJECT_Y = 2.1;
 const PROBE_W = 64;
 const PROBE_H = 36;
 
 const SURFACE_KIND: Record<SurfaceId, number> = { water: 0, leaves: 1, grass: 1, stone: 2, tin: 2, glass: 2, bells: 3 };
 
-/** Where each dial cluster floats, in world space: music around the object, ambience low. */
-const ANCHORS: Record<string, THREE.Vector3> = {
-  mood: new THREE.Vector3(-3.4, 3.8, 0.4),
-  move: new THREE.Vector3(3.4, 3.8, 0.4),
-  inst: new THREE.Vector3(-3.6, 0.8, 2.3),
-  amb: new THREE.Vector3(3.6, 0.8, 2.3),
-  perf: new THREE.Vector3(0, -0.6, 3.6),
+/** Where each dial cluster sits on screen (NDC): music around the object, ambience low. */
+const ANCHORS: Record<string, [number, number]> = {
+  mood: [-0.62, 0.42],
+  move: [0.62, 0.42],
+  inst: [-0.64, -0.5],
+  amb: [0.64, -0.5],
+  perf: [0, -0.74],
 };
 
-/** Camera framing per focused layer: [position, look-at]. */
-const FRAMING: Record<LayerId | 'none', [THREE.Vector3, THREE.Vector3]> = {
-  none: [new THREE.Vector3(0, 3.0, 9.6), new THREE.Vector3(0, 2.0, 0)],
-  music: [new THREE.Vector3(0, 2.6, 7.4), new THREE.Vector3(0, 2.1, 0)],
-  chimes: [new THREE.Vector3(0.6, 3.2, 7.8), new THREE.Vector3(0, 2.5, 0)],
-  rain: [new THREE.Vector3(0, 2.3, 8.8), new THREE.Vector3(0, 0.9, 0)],
-  wind: [new THREE.Vector3(0, 3.8, 10.2), new THREE.Vector3(0, 3.0, 0)],
+/** Chase camera per focused layer: distance behind, height, sideways offset. */
+const FRAMING: Record<LayerId | 'none', [number, number, number]> = {
+  none: [10, 3.2, 0],
+  music: [7, 2.4, 0],
+  chimes: [10, 3.4, 5],
+  rain: [9, 1.7, 0],
+  wind: [12, 6, 0],
 };
 
 const named = <T extends THREE.Object3D>(name: string, o: T): T => { o.name = name; return o; };
@@ -102,7 +102,7 @@ export interface VisualStats {
 
 export class SceneView3D {
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+  private readonly camera = new THREE.PerspectiveCamera(50, 1, 0.3, 6000);
   private readonly bg = new THREE.Scene();
   private readonly fg = new THREE.Scene();
   private readonly post = new THREE.Scene();
@@ -110,6 +110,16 @@ export class SceneView3D {
   private readonly quad: THREE.Mesh;
   private rt!: { bg: THREE.WebGLRenderTarget; fg: THREE.WebGLRenderTarget; fbA: THREE.WebGLRenderTarget; fbB: THREE.WebGLRenderTarget; comp: THREE.WebGLRenderTarget };
   private readonly probe = new THREE.WebGLRenderTarget(PROBE_W, PROBE_H);
+  /** The final frame at 5× the probe size, box-averaged down: area luminance, as WCAG means it. */
+  private readonly probeHi = new THREE.WebGLRenderTarget(PROBE_W * 5, PROBE_H * 5, { type: THREE.HalfFloatType });
+  private readonly boxMat = new THREE.ShaderMaterial({
+    vertexShader: S.QUAD_VERT,
+    fragmentShader: `uniform sampler2D tIn; uniform vec2 uTexel; varying vec2 vUv;
+      void main(){ vec3 c = vec3(0.0); for (int j = -2; j <= 2; j++) for (int i = -2; i <= 2; i++) c += texture2D(tIn, vUv + vec2(float(i), float(j)) * uTexel).rgb; gl_FragColor = vec4(c / 25.0, 1.0); }`,
+    uniforms: { tIn: { value: null }, uTexel: { value: new THREE.Vector2(1 / (PROBE_W * 5), 1 / (PROBE_H * 5)) } },
+    depthTest: false,
+    depthWrite: false,
+  });
   private readonly probeBuf = new Uint8Array(PROBE_W * PROBE_H * 4);
   private probeBusy = false;
   private readonly bloom: UnrealBloomPass;
@@ -122,17 +132,28 @@ export class SceneView3D {
   private readonly fbMat: THREE.ShaderMaterial;
   private readonly compMat: THREE.ShaderMaterial;
   private readonly finalMat: THREE.ShaderMaterial;
-  private readonly skyMat: THREE.ShaderMaterial;
-  private readonly terrainMat: THREE.ShaderMaterial;
-  private readonly lakeMat: THREE.ShaderMaterial;
+  private readonly world3d: World;
+  private readonly quality: Quality;
   private readonly rainMat: THREE.ShaderMaterial;
   private readonly hazeMat: THREE.ShaderMaterial;
   private readonly attrMats: THREE.ShaderMaterial[] = [];
-  private readonly rods: { pivot: THREE.Group; mirror: THREE.Group; u: { uHue: THREE.IUniform; uE: THREE.IUniform } }[] = [];
-  private readonly rodShared: Record<string, THREE.IUniform>;
-  private chimeGroups: THREE.Group[] = [];
   private readonly objectGroup = new THREE.Group();
-  private readonly mirrorGroup = new THREE.Group();
+  // Travel: arc length along the valley, hop, roll.
+  private travelS = 0;
+  private speed = 0;
+  private hopY = 0;
+  private hopV = 0;
+  private hover = 1.9;
+  private readonly objPos = new THREE.Vector3();
+  private readonly heading = new THREE.Vector3(0, 0, 1);
+  private readonly rollQ = new THREE.Quaternion();
+  private spin = 0;
+  private noteHop = 0;
+  private readonly objectDims: THREE.IUniform[] = [];
+  private rainTime = 0;
+  private landAmt = 0;
+  private rain: THREE.Object3D | null = null;
+  private haze: THREE.Object3D | null = null;
 
   // world state, smoothed
   private queue: { time: number; fn: () => void }[] = [];
@@ -168,16 +189,18 @@ export class SceneView3D {
   private attrD = 3.5;
   private attrDTarget = 3.5;
   private attrBoost = 0;
+  private attrGlow = 0;
   private edit: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
   private focus: LayerId | null = null;
   private editing = new Set<LayerId>();
   private lastEditRipple = 0;
-  private camPos = FRAMING.none[0].clone();
-  private camLook = FRAMING.none[1].clone();
+  private camPos = new THREE.Vector3();
+  private camLook = new THREE.Vector3();
+  private camInit = false;
   private trip = 0.6;
   private reduced = false;
   private guard = 1;
-  private readonly flash = new FlashMeter(PROBE_W, PROBE_H);
+  private flash = new FlashMeter(PROBE_W, PROBE_H);
   private frameNo = 0;
   private vt = 0;
   private probeFailed = false;
@@ -196,6 +219,18 @@ export class SceneView3D {
   private fastFor = 0;
   private width = 1;
   private height = 1;
+
+  /** Software rendering (no GPU): start on the lowest tier. */
+  static softwareGL(r: THREE.WebGLRenderer): boolean {
+    try {
+      const gl = r.getContext();
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      const name = ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : '';
+      return /swiftshader|llvmpipe|software/i.test(name);
+    } catch {
+      return false;
+    }
+  }
 
   static supported(): boolean {
     try {
@@ -249,18 +284,9 @@ export class SceneView3D {
       new THREE.ShaderMaterial({ vertexShader, fragmentShader, uniforms, ...additive, ...extra });
 
     // ---------------------------------------------------------------- the object
-    this.objectGroup.position.y = OBJECT_Y;
     this.fg.add(this.objectGroup);
-    // Reflection: the same meshes mirrored under the lake, dimmer. Shares uniforms by reference.
-    this.mirrorGroup.position.y = -OBJECT_Y;
-    this.mirrorGroup.scale.y = -1;
-    this.mirrorGroup.renderOrder = 1;
-    const addBoth = (make: (dim: number) => THREE.Object3D) => {
-      this.objectGroup.add(make(1));
-      const m = make(0.32);
-      m.renderOrder = 1;
-      this.mirrorGroup.add(m);
-    };
+    // The lake reflects the whole scene now (planar reflection), so no mirrored copies.
+    const addBoth = (make: (dim: number) => THREE.Object3D) => this.objectGroup.add(make(1));
 
     const shellGeo = new THREE.IcosahedronGeometry(1, 30);
     addBoth((dim) => named('shell', new THREE.Mesh(shellGeo, mat(S.SHELL_VERT, S.SHELL_FRAG, { ...this.shapeU, ...this.lookU, uDim: { value: dim } }))));
@@ -300,65 +326,16 @@ export class SceneView3D {
       return named('core', pts);
     });
 
-    // Chime rods hang along the far shore (ambience), with their reflections.
-    this.rodShared = { uGain: this.lookU.uGain, uEdit: { value: 0 } };
-    const rodGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 6, 1, true);
-    rodGeo.translate(0, -0.5, 0);
-    const chimeGroup = new THREE.Group();
-    const chimeMirror = new THREE.Group();
-    chimeMirror.scale.y = -1;
-    chimeMirror.renderOrder = 1;
-    for (let i = 0; i < TUBES_MAX; i++) {
-      const u = { uHue: { value: 0 }, uE: { value: 0 } };
-      const make = (dim: number) => {
-        const g = new THREE.Group();
-        g.add(new THREE.Mesh(rodGeo, mat(S.ROD_VERT, S.ROD_FRAG, { ...u, ...this.rodShared, uDim: { value: dim } })));
-        return g;
-      };
-      const pivot = make(1);
-      const mirror = make(0.32);
-      chimeGroup.add(pivot);
-      chimeMirror.add(mirror);
-      this.rods.push({ pivot, mirror, u });
-    }
-    this.chimeGroups = [chimeGroup, chimeMirror];
+    this.objectGroup.traverse((o) => {
+      const u = ((o as THREE.Mesh).material as THREE.ShaderMaterial | undefined)?.uniforms?.uDim;
+      if (u) this.objectDims.push(u);
+    });
 
     // ---------------------------------------------------------------- the place
-    this.skyMat = new THREE.ShaderMaterial({
-      vertexShader: S.SKY_VERT, fragmentShader: S.SKY_FRAG, side: THREE.BackSide, depthWrite: false, depthTest: false,
-      uniforms: { uTime: this.shapeU.uTime, uHue: this.lookU.uHue, uSat: this.lookU.uSat, uWind: { value: 0 }, uWindPhase: { value: 0 }, uTrip: { value: 0.6 }, uRain: { value: 0 } },
-    });
-    const sky = new THREE.Mesh(new THREE.SphereGeometry(200, 48, 24), this.skyMat);
-    sky.renderOrder = -10;
-    sky.name = 'sky';
-    sky.frustumCulled = false;
-    this.bg.add(sky);
-
-    this.terrainMat = new THREE.ShaderMaterial({
-      vertexShader: S.TERRAIN_VERT, fragmentShader: S.TERRAIN_FRAG,
-      uniforms: { uHue: this.lookU.uHue, uSat: this.lookU.uSat, uWet: { value: 0 }, uCam: { value: new THREE.Vector3() }, uGustPhase: { value: 0 }, uGust: { value: 0 } },
-    });
-    const terrain = new THREE.Mesh(new THREE.PlaneGeometry(220, 220, 240, 240), this.terrainMat);
-    terrain.frustumCulled = false;
-    terrain.name = 'terrain';
-    this.bg.add(terrain);
-    this.bg.add(this.mirrorGroup);
-    this.bg.add(...this.chimeGroups);
-
-    this.lakeMat = new THREE.ShaderMaterial({
-      vertexShader: S.LAKE_VERT, fragmentShader: S.LAKE_FRAG, transparent: true, depthWrite: false,
-      uniforms: {
-        uTime: { value: 0 }, uHue: this.lookU.uHue, uSat: this.lookU.uSat, uGain: this.lookU.uGain, uReduced: this.lookU.uReduced,
-        uWet: { value: 0 }, uEdit: { value: 0 }, uCam: { value: new THREE.Vector3() },
-        uRip: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, -99, 0)) },
-        uRipK: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4()) },
-      },
-    });
-    const lake = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), this.lakeMat);
-    lake.rotation.x = -Math.PI / 2;
-    lake.renderOrder = 2;
-    lake.name = 'lake';
-    this.bg.add(lake);
+    this.quality = SceneView3D.softwareGL(this.renderer) ? 'low' : 'med';
+    this.world3d = new World(this.renderer, this.lookU, this.quality);
+    this.bg.add(this.world3d.group);
+    this.travelS = this.world3d.path.sAtTheta(-0.12);
 
     // Rain streaks.
     const N = 2400;
@@ -368,7 +345,7 @@ export class SceneView3D {
     const idx = new Float32Array(N * 2);
     const rr = mulberry(11);
     for (let i = 0; i < N; i++) {
-      const s = [(rr() - 0.5) * 44, -26 + rr() * 34, rr(), 0.8 + rr() * 0.5];
+      const s = [(rr() - 0.5) * 44, (rr() - 0.5) * 44, rr(), 0.8 + rr() * 0.5];
       for (let e = 0; e < 2; e++) {
         seeds.set(s, (i * 2 + e) * 4);
         ends[i * 2 + e] = e;
@@ -379,26 +356,28 @@ export class SceneView3D {
     rainGeo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 4));
     rainGeo.setAttribute('aEnd', new THREE.BufferAttribute(ends, 1));
     rainGeo.setAttribute('aIndex', new THREE.BufferAttribute(idx, 1));
-    this.rainMat = mat(S.RAIN_VERT, S.RAIN_FRAG, { uTime: { value: 0 }, uDensity: { value: 0 }, uWind: { value: 0 }, uHue: this.lookU.uHue });
+    this.rainMat = mat(S.RAIN_VERT, S.RAIN_FRAG, { uTime: { value: 0 }, uDensity: { value: 0 }, uWind: { value: 0 }, uHue: this.lookU.uHue, uCenter: { value: new THREE.Vector3() } });
     const rain = new THREE.LineSegments(rainGeo, this.rainMat);
     rain.frustumCulled = false;
     rain.renderOrder = 3;
     rain.name = 'rain';
     this.bg.add(rain);
+    this.rain = rain;
 
     // Wind haze.
     const H = 3200;
     const hz = new Float32Array(H * 3);
     const hr = mulberry(23);
-    for (let i = 0; i < H; i++) hz.set([(hr() - 0.5) * 60, 0.3 + hr() * 12, -30 + hr() * 38], i * 3);
+    for (let i = 0; i < H; i++) hz.set([(hr() - 0.5) * 60, 0.3 + hr() * 12, (hr() - 0.5) * 60], i * 3);
     const hazeGeo = new THREE.BufferGeometry();
     hazeGeo.setAttribute('position', new THREE.BufferAttribute(hz, 3));
-    this.hazeMat = mat(S.HAZE_VERT, S.HAZE_FRAG, { uTime: this.shapeU.uTime, uWindPhase: { value: 0 }, uPixel: { value: 1 }, uWind: { value: 0 }, uHue: this.lookU.uHue, uEdit: { value: 0 } });
+    this.hazeMat = mat(S.HAZE_VERT, S.HAZE_FRAG, { uTime: this.shapeU.uTime, uWindPhase: { value: 0 }, uPixel: { value: 1 }, uWind: { value: 0 }, uHue: this.lookU.uHue, uEdit: { value: 0 }, uCenter: { value: new THREE.Vector3() } });
     const haze = new THREE.Points(hazeGeo, this.hazeMat);
     haze.frustumCulled = false;
     haze.renderOrder = 3;
     haze.name = 'haze';
     this.bg.add(haze);
+    this.haze = haze;
 
     // ---------------------------------------------------------------- post
     const quadMat = (fragmentShader: string, uniforms: Record<string, THREE.IUniform>) =>
@@ -424,21 +403,10 @@ export class SceneView3D {
 
   setTubes(freqs: number[]): void {
     this.tubeHz = freqs.slice(0, TUBES_MAX);
-    const n = this.tubeHz.length;
-    this.rods.forEach((r, i) => {
-      const on = i < n;
-      r.pivot.visible = r.mirror.visible = on;
-      if (!on) return;
-      const hz = this.tubeHz[i];
-      r.u.uHue.value = pitchHue(hz) / 360;
-      // An arc along the far shore, behind the object.
-      const a = Math.PI * (1.18 + 0.64 * (n > 1 ? i / (n - 1) : 0.5));
-      const len = Math.min(2.6, Math.max(1.1, 1.8 * Math.sqrt(523 / hz)));
-      for (const g of [r.pivot, r.mirror]) {
-        g.position.set(Math.cos(a) * 7.5, 4.4, Math.sin(a) * 7.5);
-        g.children[0].scale.y = len;
-      }
-    });
+    this.world3d.setTubes(
+      this.tubeHz.map((hz) => pitchHue(hz) / 360),
+      this.tubeHz.map((hz) => Math.min(2.6, Math.max(1.1, 1.8 * Math.sqrt(523 / hz)))),
+    );
   }
 
   setWorld(w: Partial<VisualWorld>): void {
@@ -484,6 +452,9 @@ export class SceneView3D {
    */
   step(dt: number): void {
     this.stop();
+    // Switching from real time to the fixed clock: start the flash record afresh, or real-time
+    // samples (wall-clock timestamps) and fixed-clock samples would mix and run backwards.
+    if (this.manualDt === null) this.flash = new FlashMeter(PROBE_W, PROBE_H);
     this.manualDt = dt;
     this.frame();
   }
@@ -498,6 +469,12 @@ export class SceneView3D {
     for (const sc of [this.bg, this.fg]) sc.traverse((o) => { if (o.name) o.visible = !names.includes(o.name); });
   }
 
+  /** For tests and screenshots: jump the object to a path angle (radians). */
+  teleport(theta: number): void {
+    this.travelS = this.world3d.path.sAtTheta(theta);
+    this.camInit = false;
+  }
+
   /** The clock `step` runs on (seconds). */
   get clock(): number {
     return this.vt;
@@ -509,8 +486,10 @@ export class SceneView3D {
 
   /** Screen position (CSS px) of a layer's dial anchor, and a depth-based scale. */
   anchor(cluster: string): { x: number; y: number; depth: number } {
-    const p = (ANCHORS[cluster] ?? ANCHORS.mood).clone().project(this.camera);
-    return { x: (p.x * 0.5 + 0.5) * this.width, y: (-p.y * 0.5 + 0.5) * this.height, depth: p.z };
+    const [x, y] = ANCHORS[cluster] ?? ANCHORS.mood;
+    // Fixed on screen with a faint float, so they sit in the scene without chasing the camera.
+    const bob = this.reduced ? 0 : Math.sin(this.vt * 0.4 + x * 3) * 0.006;
+    return { x: (x * 0.5 + 0.5) * this.width, y: (-(y + bob) * 0.5 + 0.5) * this.height, depth: 0 };
   }
 
   push(events: WorldEvents, features: WorldFeatures, timeOf: (frame: number) => number): void {
@@ -538,10 +517,14 @@ export class SceneView3D {
     const h = ((frame * 2654435761) >>> 0) / 4294967296;
     const i = this.ripIdx++ % RIPPLES;
     const size = Math.min(1, dMm / 3.5);
-    (this.lakeMat.uniforms.uRip.value as THREE.Vector4[])[i].set(pan * 7.5, -3 + h * 9, this.vt, size);
+    // Around the object: across the view by pan, from just behind it to ahead.
+    const f = this.heading;
+    const rx = -f.z, rz = f.x;
+    const along = -4 + h * 14;
+    (this.world3d.waterMat.uniforms.uRip.value as THREE.Vector4[])[i].set(this.objPos.x + rx * pan * 8 + f.x * along, this.objPos.z + rz * pan * 8 + f.z * along, this.vt, size);
     const kind = SURFACE_KIND[surface] ?? 0;
     const hue = kind === 3 && bubbleHz > 0 ? pitchHue(bubbleHz) / 360 : 0;
-    (this.lakeMat.uniforms.uRipK.value as THREE.Vector4[])[i].set(kind, hue, 0.45 + 0.55 * size, 0);
+    (this.world3d.waterMat.uniforms.uRipK.value as THREE.Vector4[])[i].set(kind, hue, 0.45 + 0.55 * size, 0);
   }
 
   private onChord(hz: number, step: number): void {
@@ -578,6 +561,7 @@ export class SceneView3D {
     (this.shapeU.uNodeInfo.value as THREE.Vector4[])[i].set(pitchHue(hz) / 360, 0.5 + 0.5 * Math.min(1, velocity), 0, 0);
     this.nodeBirth[i] = this.vt;
     this.attrBoost = Math.min(1.5, this.attrBoost + 0.5 * velocity);
+    this.noteHop = Math.max(this.noteHop, 0.7 * velocity);
   }
 
   // ------------------------------------------------------------------ frame
@@ -610,7 +594,7 @@ export class SceneView3D {
     this.bloom.setSize(pw, ph);
     this.camera.aspect = w / h;
     // Keep the object comfortably in frame on tall, narrow screens.
-    this.camera.fov = w / h < 1 ? 42 + (1 - w / h) * 30 : 42;
+    this.camera.fov = w / h < 1 ? 50 + (1 - w / h) * 25 : 50;
     this.camera.updateProjectionMatrix();
     this.fbMat.uniforms.uAspect.value = w / h;
     this.finalMat.uniforms.uAspect.value = w / h;
@@ -708,16 +692,11 @@ export class SceneView3D {
     const tubeE = su.uTubeE.value as number[];
     const preview = 0.2 * this.edit.music;
     for (let i = 0; i < TUBES_MAX; i++) tubeE[i] = Math.max(this.bowlE[i] * bowlCap, preview * (i === 2 ? 1 : 0));
-    // Chimes (ambience) → rods on the shore.
+    // Chimes (ambience) → tubes on the shore trees, swinging with the wind.
     const chimeCap = slew(this.chimeKick, this.chimeE, Math.max(0.6, 0.9 * this.world.sustain));
-    for (let i = 0; i < TUBES_MAX; i++) {
-      const rod = this.rods[i];
-      rod.u.uE.value = this.chimeE[i] * chimeCap;
-      const sway = rm ? 0 : Math.sin(now * (1.1 + i * 0.13) + i * 1.7) * 0.07 * this.wind;
-      const lean = Math.max(-0.3, Math.min(0.3, this.gust * 0.12 * this.wind)) * motion;
-      for (const g of [rod.pivot, rod.mirror]) { g.rotation.z = lean + sway; g.rotation.x = sway * 0.6; }
-    }
-    this.rodShared.uEdit.value = this.edit.chimes;
+    for (let i = 0; i < TUBES_MAX; i++) this.world3d.tubeU[i].uE.value = this.chimeE[i] * chimeCap;
+    this.world3d.swing(now, this.wind, this.gust, rm ? 0.2 : 1);
+    this.world3d.rodShared.uEdit.value = this.edit.chimes;
     // Beat: the kick swells the object a little; slow release so a pulse reads as breathing.
     this.beatKick *= Math.exp(-dt / 0.1);
     this.beatE = this.beatKick > this.beatE ? this.beatE + Math.min(this.beatKick - this.beatE, dt * 5) : this.beatE * Math.exp(-dt / 0.45);
@@ -748,53 +727,97 @@ export class SceneView3D {
     pu.uSeed.value = (now * 0.37) % 100;
     this.gpu.compute();
     const posTex = this.gpu.getCurrentRenderTarget(this.posVar).texture;
-    this.attrMats.forEach((mm) => { mm.uniforms.tPos.value = posTex; mm.uniforms.uBoost.value = this.attrBoost * this.guard + 0.6 * this.world.texture; });
+    // Core glow follows the notes through the same slew as other event light (rise ≥ ~150 ms,
+    // slow release), so a burst of notes holds a steady glow instead of pulsing.
+    const glowTarget = Math.min(1, this.attrBoost);
+    this.attrGlow = glowTarget > this.attrGlow ? this.attrGlow + Math.min(glowTarget - this.attrGlow, dt * 3) : this.attrGlow * Math.exp(-dt / 1.2);
+    this.attrMats.forEach((mm) => { mm.uniforms.tPos.value = posTex; mm.uniforms.uBoost.value = this.attrGlow * 0.6 * this.guard + 0.6 * this.world.texture; });
 
     // Place.
     const rainOn = this.levels.rain > 0.02 ? 1 : this.levels.rain / 0.02;
     const wet = Math.min(1, Math.log10(1 + this.world.rainRate) / 2) * rainOn;
-    this.skyMat.uniforms.uWind.value = Math.min(1.2, this.wind) * (0.4 + 0.6 * this.levels.wind) + this.edit.wind * 0.3;
-    this.skyMat.uniforms.uWindPhase.value = this.windPhase;
-    this.skyMat.uniforms.uTrip.value = trip;
-    this.skyMat.uniforms.uRain.value = wet * 0.6;
-    this.terrainMat.uniforms.uWet.value = wet + this.edit.rain * 0.4;
-    this.terrainMat.uniforms.uGustPhase.value = this.gustPhase;
-    this.terrainMat.uniforms.uGust.value = Math.max(0, this.gust) * this.wind * motion;
-    (this.terrainMat.uniforms.uCam.value as THREE.Vector3).copy(this.camera.position);
-    this.lakeMat.uniforms.uTime.value = now;
-    this.lakeMat.uniforms.uWet.value = wet;
-    this.lakeMat.uniforms.uEdit.value = this.edit.rain;
-    (this.lakeMat.uniforms.uCam.value as THREE.Vector3).copy(this.camera.position);
+    const sky = this.world3d.skyMat.uniforms;
+    sky.uWind.value = Math.min(1.2, this.wind) * (0.4 + 0.6 * this.levels.wind) + this.edit.wind * 0.3;
+    sky.uWindPhase.value = this.windPhase;
+    sky.uTrip.value = trip;
+    sky.uRain.value = wet * 0.6;
+    const water = this.world3d.waterMat.uniforms;
+    water.uEdit.value = this.edit.rain;
+    water.uFrozen.value = this.frozen;
     if (this.edit.rain > 0.3 && now - this.lastEditRipple > 0.5) {
       this.lastEditRipple = now;
       this.ripTokens += 1;
       this.addRipple((Math.random() - 0.5) * 0.8, 2.5, 'water', 0, Math.floor(now * 1000));
     }
-    this.rainMat.uniforms.uTime.value = now * motion;
+    // Freeze stops the rain in mid-air.
+    this.rainTime += dt * motion * (1 - this.frozen);
+    this.rainMat.uniforms.uTime.value = this.rainTime;
     this.rainMat.uniforms.uDensity.value = Math.min(1, 0.05 + 0.3 * Math.log10(1 + this.world.rainRate)) * rainOn;
     this.rainMat.uniforms.uWind.value = Math.min(1.5, this.wind) * 0.8;
     this.hazeMat.uniforms.uWindPhase.value = this.windPhase;
     this.hazeMat.uniforms.uWind.value = Math.min(1.2, this.wind);
     this.hazeMat.uniforms.uEdit.value = this.edit.wind;
 
-    // Camera: slow drift, eased toward the focused layer.
-    const [fp, fl] = FRAMING[this.focus ?? 'none'];
-    const driftAmt = rm ? 0 : 1;
-    const yaw = Math.sin(now * 0.021) * 0.22 * driftAmt;
-    const target = fp.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    target.y += Math.sin(now * 0.017) * 0.25 * driftAmt;
-    const camTau = rm ? 0.25 : 1.1;
-    this.camPos.lerp(target, 1 - Math.exp(-dt / camTau));
-    this.camLook.lerp(fl, 1 - Math.exp(-dt / camTau));
+    // Travel: the object follows the valley, gliding over water, rolling and hopping on land.
+    const path = this.world3d.path;
+    this.speed = ease(this.speed, 2.4 * (0.7 + 0.6 * music) * (rm ? 0.5 : 1) * (1 - this.frozen), dt, 1.5);
+    this.travelS += this.speed * dt;
+    const P = path.at(this.travelS);
+    const A = path.at(this.travelS + 6);
+    const hd = new THREE.Vector3(A.x - P.x, 0, A.z - P.z).normalize();
+    this.heading.lerp(hd, 1 - Math.exp(-dt / 0.6)).normalize();
+    const ground = this.world3d.floorAt(P.x, P.z);
+    const onWater = ground < 0.3;
+    this.landAmt = ease(this.landAmt, onWater ? 0 : 1, dt, 0.8);
+    const base = onWater ? 2.0 + 0.2 * Math.sin(now * 0.7) : ground + 1.5;
+    this.hover = ease(this.hover, base, dt, onWater ? 1.2 : 0.3);
+    if (!rm && !onWater && this.hopY <= 0.001) {
+      if (this.beatKick > 0.5) this.hopV = 2 + 2 * this.beatKick;
+      else if (this.noteHop > 0.3) this.hopV = 1.6 * this.noteHop;
+      if (this.hopV > 0) this.noteHop = 0;
+    }
+    this.noteHop *= Math.exp(-dt / 1.5);
+    this.hopV -= 14 * dt;
+    this.hopY += this.hopV * dt;
+    if (this.hopY < 0) { this.hopY = 0; this.hopV = Math.abs(this.hopV) > 1.5 ? -this.hopV * 0.35 : 0; }
+    this.objPos.set(P.x, this.hover + this.hopY, P.z);
+    // Rolling on land: about the axis across the direction of travel.
+    if (!rm) {
+      const axis = new THREE.Vector3(this.heading.z, 0, -this.heading.x);
+      this.rollQ.premultiply(new THREE.Quaternion().setFromAxisAngle(axis, (this.speed * dt / 1.3) * this.landAmt)).normalize();
+    }
+    this.spin += dt * (0.05 + 0.05 * trip) * motion * (1 - 0.85 * this.frozen);
+    this.objectGroup.position.copy(this.objPos);
+    this.objectGroup.quaternion.copy(this.rollQ).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.spin));
+
+    // Camera: follows from behind along the path, drifting a little; framing shifts with focus.
+    const [dist, height, side] = FRAMING[this.focus ?? 'none'];
+    const B = path.at(this.travelS - dist);
+    const drift = rm ? 0 : 1;
+    const lateral = side + Math.sin(now * 0.05) * 1.6 * drift;
+    const rx = -this.heading.z, rz = this.heading.x;
+    const cx = B.x + rx * lateral, cz = B.z + rz * lateral;
+    const cg = Math.max(0, this.world3d.floorAt(cx, cz));
+    const camTarget = new THREE.Vector3(cx, Math.max(cg + height, this.objPos.y + 0.6) + Math.sin(now * 0.07) * 0.4 * drift, cz);
+    const lookTarget = this.objPos.clone().addScaledVector(this.heading, 3).add(new THREE.Vector3(0, 0.4, 0));
+    if (!this.camInit) { this.camPos.copy(camTarget); this.camLook.copy(lookTarget); this.camInit = true; }
+    const camTau = rm ? 1.6 : 0.9;
+    this.camPos.lerp(camTarget, 1 - Math.exp(-dt / camTau));
+    this.camLook.lerp(lookTarget, 1 - Math.exp(-dt / (camTau * 0.6)));
+    this.camPos.y = Math.max(this.camPos.y, Math.max(0, this.world3d.floorAt(this.camPos.x, this.camPos.z)) + 1.2);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
-    this.objectGroup.rotation.y += dt * (0.05 + 0.05 * trip) * motion * (1 - 0.85 * this.frozen);
-    this.mirrorGroup.rotation.y = this.objectGroup.rotation.y;
+    this.camera.updateMatrixWorld();
+    this.world3d.update(this.camera, now, this.hue, sat, wet);
+    (this.rainMat.uniforms.uCenter.value as THREE.Vector3).copy(this.camPos);
+    (this.hazeMat.uniforms.uCenter.value as THREE.Vector3).copy(this.camPos);
 
     // ---------------------------------------------------------------- render
     const r = this.renderer;
-    const c = new THREE.Vector3(0, OBJECT_Y, 0).project(this.camera);
+    const c = this.objPos.clone().project(this.camera);
     (this.fbMat.uniforms.uCenter.value as THREE.Vector2).set(c.x * 0.5 + 0.5, c.y * 0.5 + 0.5);
+    const rs = this.pinnedScale ?? this.scale;
+    this.world3d.renderReflection(this.camera, [this.bg, this.fg], [this.world3d.water, this.rain!, this.haze!], this.width * rs, this.height * rs, this.objectDims);
 
     r.setRenderTarget(this.rt.bg);
     r.render(this.bg, this.camera);
@@ -821,7 +844,8 @@ export class SceneView3D {
 
     const fu = this.finalMat.uniforms;
     fu.tIn.value = this.rt.comp.texture;
-    fu.uKal.value = rm ? 0 : (() => { const k = Math.min(1, Math.max(0, (this.trip - 0.8) / 0.17)); return k * k * (3 - 2 * k) * 0.85; })();
+    // Fold: begins around Trip 62 and deepens continuously to 100 (see FINAL_FRAG).
+    fu.uKal.value = rm ? 0 : (() => { const k = Math.min(1, Math.max(0, (this.trip - 0.62) / 0.38)); return k * k * (3 - 2 * k); })();
     fu.uKalRot.value = now * 0.02;
     fu.uCA.value = 0.0015 + 0.004 * trip;
     fu.uGrain.value = 0.012 + 0.03 * this.world.age;
@@ -831,11 +855,11 @@ export class SceneView3D {
     // Flash probe: a tiny copy of the final frame, read back without stalling.
     this.frameNo++;
     if (this.syncProbe) {
-      this.drawQuad(this.finalMat, this.probe);
+      this.drawProbe();
       r.readRenderTargetPixels(this.probe, 0, 0, PROBE_W, PROBE_H, this.probeBuf);
       this.flash.push(this.manualDt !== null ? this.vt : performance.now() / 1000, this.probeBuf);
     } else if (this.frameNo % 3 === 0 && !this.probeBusy) {
-      this.drawQuad(this.finalMat, this.probe);
+      this.drawProbe();
       this.probeBusy = true;
       const t = performance.now() / 1000;
       r.readRenderTargetPixelsAsync(this.probe, 0, 0, PROBE_W, PROBE_H, this.probeBuf)
@@ -843,6 +867,12 @@ export class SceneView3D {
         .catch((e) => { if (!this.probeFailed) console.warn('flash probe', e); this.probeFailed = true; })
         .finally(() => (this.probeBusy = false));
     }
+  }
+
+  private drawProbe(): void {
+    this.drawQuad(this.finalMat, this.probeHi);
+    this.boxMat.uniforms.tIn.value = this.probeHi.texture;
+    this.drawQuad(this.boxMat, this.probe);
   }
 
   private drawQuad(material: THREE.ShaderMaterial, target: THREE.WebGLRenderTarget | null): void {

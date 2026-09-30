@@ -260,13 +260,18 @@ uniform float uSize;
 uniform float uPixel;
 varying float vSpeed;
 varying float vHeight;
+varying float vArea;
 void main(){
   vec4 s = texture2D(tPos, position.xy);
   vec3 p = vec3(s.x, s.z - 0.35, s.y) * 0.62;
   vSpeed = s.w;
   vHeight = s.z;
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_PointSize = uSize * uPixel / max(0.5, -mv.z);
+  // Sub-pixel points rasterise unstably (they shimmer as they move); draw them at least 1.5 px
+  // and dim them by the area they gained, so total light is unchanged at any resolution.
+  float sz = uSize * uPixel / max(0.5, -mv.z);
+  vArea = min(1.0, (sz * sz) / 2.25);
+  gl_PointSize = max(sz, 1.5);
   gl_Position = projectionMatrix * mv;
 }
 `;
@@ -280,11 +285,12 @@ uniform float uDim;
 uniform float uBoost;
 varying float vSpeed;
 varying float vHeight;
+varying float vArea;
 void main(){
   vec2 c = gl_PointCoord - 0.5;
   float a = smoothstep(0.25, 0.0, dot(c, c));
   vec3 col = hsv(vec3(uHue + 0.5 + 0.12 * clamp(vSpeed * 0.4, 0.0, 1.0) - 0.08 * vHeight, uSat * 0.85, 1.0));
-  gl_FragColor = vec4(col * a * (0.01 + 0.014 * uLevel + 0.014 * uBoost) * uDim, 1.0);
+  gl_FragColor = vec4(col * a * vArea * (0.08 + 0.11 * uLevel + 0.11 * uBoost) * uDim, 1.0);
 }
 `;
 
@@ -308,135 +314,8 @@ void main(){
 }
 `;
 
-/** Sky: near-black gradient, a domain-warped nebula in the chord's colours, wind aurora, a few stars. */
-export const SKY_VERT = /* glsl */ `
-varying vec3 vDir;
-void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }
-`;
-export const SKY_FRAG = /* glsl */ `
-${NOISE}
-uniform float uTime;
-uniform float uHue;
-uniform float uSat;
-uniform float uWind;
-uniform float uWindPhase;
-uniform float uTrip;
-uniform float uRain;
-varying vec3 vDir;
-void main(){
-  vec3 d = normalize(vDir);
-  float up = clamp(d.y, -0.2, 1.0);
-  vec3 col = hsv(vec3(uHue + 0.55, 0.55, 1.0)) * (0.003 + 0.008 * (1.0 - up)) * (1.0 - 0.4 * uRain);
-  vec3 q = d * 2.2 + vec3(uWindPhase * 0.05, 0.0, uTime * 0.004);
-  vec3 w = vec3(fbm(q), fbm(q + 5.2), fbm(q + 9.7));
-  float n = fbm(q + w * (0.8 + 1.2 * uTrip));
-  col += hsv(vec3(uHue + 0.1 * n, uSat * 0.8, 1.0)) * pow(max(0.0, n + 0.1), 3.0) * (0.03 + 0.06 * uTrip) * smoothstep(-0.05, 0.4, up);
-  // Aurora: bands that brighten and move with the wind.
-  float band = smoothstep(0.12, 0.35, up) * smoothstep(0.75, 0.4, up);
-  float curtain = fbm(vec3(d.x * 3.0 + uWindPhase * 0.12, up * 9.0, d.z * 3.0 + uTime * 0.02));
-  col += hsv(vec3(uHue + 0.33 + 0.1 * curtain, 0.7, 1.0)) * band * smoothstep(0.0, 0.6, curtain) * 0.16 * uWind;
-  gl_FragColor = vec4(col, 1.0);
-}
-`;
 
-/** Landscape: ridged hills drawn as contour lines, domain-warped by gusts, glossier in rain. */
-export const TERRAIN_VERT = /* glsl */ `
-${NOISE}
-uniform float uGustPhase;
-uniform float uGust;
-varying float vH;
-varying vec3 vW;
-float heightAt(vec2 p){
-  vec2 q = p * 0.035 + vec2(snoise(vec3(p * 0.02, uGustPhase * 0.02)), snoise(vec3(p * 0.02 + 9.0, uGustPhase * 0.02))) * (0.25 + 0.35 * uGust);
-  float r = 0.0, a = 1.0;
-  for (int i = 0; i < 4; i++) { r += a * (1.0 - abs(snoise(vec3(q, 1.7)))); q *= 2.1; a *= 0.48; }
-  float dist = length(p);
-  return (r * 5.0 - 1.0) * smoothstep(13.0, 48.0, dist) - 6.0 * (1.0 - smoothstep(9.0, 14.0, dist));
-}
-void main(){
-  vec3 p = vec3(position.x, 0.0, -position.y);   // plane XY → ground XZ, keeping faces upward
-  p.y = heightAt(p.xz);
-  vH = p.y;
-  vW = p;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-}
-`;
-export const TERRAIN_FRAG = /* glsl */ `
-${NOISE}
-uniform float uHue;
-uniform float uSat;
-uniform float uWet;
-uniform vec3 uCam;
-varying float vH;
-varying vec3 vW;
-void main(){
-  float v = vH * 1.3;
-  float f = abs(fract(v) - 0.5) * 2.0;
-  float w = fwidth(v) * 1.3;
-  // Lines thinner than a pixel alias into moiré; fade them out instead.
-  float keep = 1.0 - smoothstep(0.25, 0.7, fwidth(v));
-  float line = smoothstep(1.0 - w * 2.0, 1.0, f) * keep;
-  float major = smoothstep(1.0 - w * 0.5, 1.0, abs(fract(v / 5.0) - 0.5) * 2.0) * (1.0 - smoothstep(0.8, 2.5, fwidth(v)));
-  float dist = length(vW - uCam);
-  float fog = exp(-dist * 0.028);
-  vec3 lc = hsv(vec3(uHue + 0.5 - vH * 0.012, uSat * 0.7, 1.0));
-  vec3 col = vec3(0.004, 0.006, 0.01) + lc * (line * 0.22 + major * 0.3) * (1.0 + 0.9 * uWet) * fog;
-  gl_FragColor = vec4(col, 1.0);
-}
-`;
 
-/** Lake: dark water over the reflection, with rain ripples in the drop's character. */
-export const LAKE_VERT = /* glsl */ `
-varying vec3 vW;
-void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }
-`;
-export const LAKE_FRAG = /* glsl */ `
-${NOISE}
-uniform float uTime;
-uniform float uHue;
-uniform float uSat;
-uniform float uGain;
-uniform float uWet;
-uniform float uEdit;
-uniform float uReduced;
-uniform vec3 uCam;
-uniform vec4 uRip[48];   // x, z, birth time, size
-uniform vec4 uRipK[48];  // kind (0 water, 1 soft, 2 hard, 3 bell), hue, velocity, -
-varying vec3 vW;
-void main(){
-  vec2 p = vW.xz;
-  float dist = length(vW - uCam);
-  vec3 col = vec3(0.0);
-  for (int i = 0; i < 48; i++) {
-    float age = uTime - uRip[i].z;
-    if (age < 0.0 || age > 2.6) continue;
-    float d = length(p - uRip[i].xy);
-    float kind = uRipK[i].x;
-    float s = uRip[i].w;
-    float val = 0.0;
-    if (kind < 0.5) {
-      float r = age * (0.55 + 0.25 * s);
-      val = (exp(-pow((d - r) / 0.03, 2.0)) + 0.5 * exp(-pow((d - r * 0.62) / 0.025, 2.0))) * exp(-age * 1.6);
-    } else if (kind < 1.5) {
-      val = exp(-d * d / (0.02 + 0.05 * s)) * exp(-age * 3.0) * 0.8;
-    } else if (kind < 2.5) {
-      float r = age * 1.4 * (0.6 + 0.4 * s);
-      val = exp(-pow((d - r) / 0.012, 2.0)) * exp(-age * 5.0) * 1.2;
-    } else {
-      float r = age * 0.45;
-      val = exp(-pow((d - r) / 0.03, 2.0)) * exp(-age * 1.0);
-    }
-    if (uReduced > 0.5) val = exp(-d * d / 0.03) * exp(-age * 2.0) * 0.5;
-    float hue = kind > 2.5 ? uRipK[i].y : uHue + 0.5;
-    col += hsv(vec3(hue, kind > 2.5 ? 0.6 : 0.25 * uSat, 1.0)) * val * uRipK[i].z;
-  }
-  col *= uGain * (1.0 + uEdit) * exp(-dist * 0.05);
-  // Sheen that grows with rain: a faint horizon-lit gradient.
-  float grazing = pow(1.0 - clamp(abs(normalize(uCam - vW).y), 0.0, 1.0), 4.0);
-  col += hsv(vec3(uHue + 0.55, 0.5, 1.0)) * grazing * (0.006 + 0.02 * uWet);
-  gl_FragColor = vec4(col, 0.78);
-}
-`;
 
 /** Rain streaks: line segments falling through a box around the view, slanted by the wind. */
 export const RAIN_VERT = /* glsl */ `
@@ -446,12 +325,14 @@ attribute float aIndex; // 0..1
 uniform float uTime;
 uniform float uDensity;
 uniform float uWind;
+uniform vec3 uCenter;   // the camera: the rain box wraps around it
 varying float vFade;
 varying float vEnd;
 void main(){
   if (aIndex > uDensity) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   float fall = fract(aSeed.z - uTime * aSeed.w * 0.55);
-  vec3 p = vec3(aSeed.x, 0.2 + fall * 16.0, aSeed.y);
+  vec2 rel = mod(aSeed.xy - uCenter.xz + 22.0, 44.0) - 22.0;
+  vec3 p = vec3(uCenter.x + rel.x, uCenter.y - 6.0 + fall * 18.0, uCenter.z + rel.y);
   vec3 vel = normalize(vec3(uWind * 0.9, -1.0, 0.0));
   p -= vel * aEnd * 0.55;
   vFade = smoothstep(0.0, 0.1, fall) * smoothstep(1.0, 0.8, fall);
@@ -474,6 +355,7 @@ uniform float uTime;
 uniform float uWindPhase;
 uniform float uPixel;
 uniform float uWind;
+uniform vec3 uCenter;
 varying float vA;
 vec3 curl(vec3 p){
   float e = 0.1;
@@ -485,7 +367,8 @@ vec3 curl(vec3 p){
 }
 void main(){
   vec3 p = position;
-  p.x = mod(p.x + uWindPhase + 30.0, 60.0) - 30.0;
+  vec2 rel = mod(vec2(p.x + uWindPhase, p.z) - uCenter.xz + 30.0, 60.0) - 30.0;
+  p = vec3(uCenter.x + rel.x, uCenter.y - 3.0 + p.y, uCenter.z + rel.y);
   p += curl(p * 0.07 + vec3(0.0, uTime * 0.02, uWindPhase * 0.01)) * (0.8 + 1.5 * uWind);
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   vA = smoothstep(30.0, 5.0, -mv.z);
@@ -585,8 +468,17 @@ vec3 sampleCA(vec2 uv){
 }
 vec3 aces(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main(){
-  vec3 col = sampleCA(vUv);
-  if (uKal > 0.001) col = mix(col, sampleCA(fold(vUv)), uKal);
+  // Fold space, not the picture: coordinates bend toward their mirrored positions, starting at
+  // the screen edge and creeping inward as uKal rises, so there is never a double image.
+  vec2 uv = vUv;
+  if (uKal > 0.001) {
+    vec2 c = vUv - uCenter;
+    c.x *= uAspect;
+    float reach = mix(1.3, 0.28, uKal);
+    float k = smoothstep(reach, reach + 0.4, length(c)) * uKal * 0.92;
+    uv = mix(vUv, fold(vUv), k);
+  }
+  vec3 col = sampleCA(uv);
   vec2 v = vUv - 0.5;
   col *= 1.0 - dot(v, v) * 0.9;
   col = aces(col * uExposure);
