@@ -54,7 +54,7 @@ Tarn Sandbox is a browser toy: generative ambient music with natural ambience (r
 
 ## 4. Build, test, verify
 
-- `npm test`: 66 tests, about 3 minutes; the Lab render test is the slow one (300 s timeout).
+- `npm test`: 70 tests, about 3 minutes; the Lab render test is the slow one (300 s timeout).
 - `npm run build:artifact` → `dist-artifact/sandbox.html` (about 777 KB, single file).
 - `node scripts/flash-check.mjs`: renders the real scene on a fixed clock with worst-case event bursts. A deliberate strobe control **must fail** (it proves the meter works); every other scenario must stay at 3 flashes/s or below. Run it after any visual change.
 - `node scripts/visual-preview.mjs <outDir> [trip] [w] [h] [ui]`: deterministic stills. Environment variables: `SHOTS=40,90`, `SCALE=0.7`, `THETA=0.8` (jump along the path; 0 = the Tarn, about 0.17 = a chime tree, 0.8 = meadows), `HIDE=shell,cage,core,terrain,lake,sky,rain,haze,trees`, `TAG`.
