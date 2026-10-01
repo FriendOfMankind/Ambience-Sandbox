@@ -17,12 +17,13 @@
 import { ChimeSynth, DEFAULT_CHIME_PARAMS, type ChimeEvent, type ChimeParams } from '../nature/chimes/ChimeSynth';
 import { DEFAULT_RAIN_PARAMS, RainSynth, type RainEvent, type RainParams } from '../nature/rain/RainSynth';
 import { DEFAULT_WIND_PARAMS, WindSynth, type WindParams } from '../nature/wind/WindSynth';
+import { DEFAULT_FIRE_PARAMS, FireSynth, type FireEvent, type FireParams } from '../nature/fire/FireSynth';
 import { DEFAULT_MUSIC_PARAMS, MusicSynth, type MusicEvent, type MusicParams } from '../music/MusicSynth';
 import type { ScaleSnap } from '../music/scales';
 import { DEFAULT_REVERB_PARAMS, Reverb, type ReverbParams } from '../dsp/Reverb';
 import { Biquad } from '../music/voices';
 
-export const LAYERS = ['rain', 'wind', 'chimes', 'music'] as const;
+export const LAYERS = ['rain', 'wind', 'chimes', 'fire', 'music'] as const;
 export type LayerId = (typeof LAYERS)[number];
 
 export interface LayerMix {
@@ -48,6 +49,7 @@ export interface WorldParams {
   rain: Partial<RainParams>;
   wind: Partial<WindParams>;
   chimes: Partial<ChimeParams>;
+  fire: Partial<FireParams>;
   music: Partial<MusicParams>;
   reverb: Partial<ReverbParams>;
 }
@@ -59,6 +61,7 @@ export interface WorldParamsPatch {
   rain?: Partial<RainParams>;
   wind?: Partial<WindParams>;
   chimes?: Partial<ChimeParams>;
+  fire?: Partial<FireParams>;
   music?: Partial<MusicParams>;
   reverb?: Partial<ReverbParams>;
 }
@@ -75,6 +78,7 @@ export interface WorldFeatures {
 export interface WorldEvents {
   rain: RainEvent[];
   chimes: ChimeEvent[];
+  fire: FireEvent[];
   music: MusicEvent[];
 }
 
@@ -83,6 +87,8 @@ export const DEFAULT_WORLD_PARAMS: WorldParams = {
     rain: { on: true, level: 1.4, send: 0.08 },
     wind: { on: true, level: 0.5, send: 0 },
     chimes: { on: true, level: 0.9, send: 0.35 },
+    // Fire is opt-in.
+    fire: { on: false, level: 0.8, send: 0.12 },
     music: { on: true, level: 0.6, send: 0.45 },
   },
   bus: { blend: 0.5, support: 0.6 },
@@ -90,6 +96,7 @@ export const DEFAULT_WORLD_PARAMS: WorldParams = {
   rain: {},
   wind: {},
   chimes: {},
+  fire: {},
   music: {},
   reverb: {},
 };
@@ -101,23 +108,25 @@ export class WorldSynth {
   readonly rain: RainSynth;
   readonly wind: WindSynth;
   readonly chimes: ChimeSynth;
+  readonly fire: FireSynth;
   readonly music: MusicSynth;
   readonly reverb: Reverb;
   private p: WorldParams;
-  private readonly gainCur: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
-  private readonly levelCur: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
+  private readonly gainCur: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, fire: 0, music: 0 };
+  private readonly levelCur: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, fire: 0, music: 0 };
   private chordStep = 0;
   private musicTrim = 1;
   private ambTrim = 1;
   private presence = 0;
   private readonly carveL = new Biquad();
   private readonly carveR = new Biquad();
-  private events: WorldEvents = { rain: [], chimes: [], music: [] };
+  private events: WorldEvents = { rain: [], chimes: [], fire: [], music: [] };
 
   private readonly buf = {
     rainL: new Float32Array(BLOCK_MAX), rainR: new Float32Array(BLOCK_MAX),
     windL: new Float32Array(BLOCK_MAX), windR: new Float32Array(BLOCK_MAX),
     chimeL: new Float32Array(BLOCK_MAX), chimeR: new Float32Array(BLOCK_MAX),
+    fireL: new Float32Array(BLOCK_MAX), fireR: new Float32Array(BLOCK_MAX),
     musicL: new Float32Array(BLOCK_MAX), musicR: new Float32Array(BLOCK_MAX),
     mSendL: new Float32Array(BLOCK_MAX), mSendR: new Float32Array(BLOCK_MAX),
     sendL: new Float32Array(BLOCK_MAX), sendR: new Float32Array(BLOCK_MAX),
@@ -134,6 +143,7 @@ export class WorldSynth {
     this.rain = new RainSynth(fs, seed, { ...DEFAULT_RAIN_PARAMS, ...this.p.rain, scale: this.p.rain.scale ?? { ...scale, enabled: false } });
     this.wind = new WindSynth(fs, seed, { ...DEFAULT_WIND_PARAMS, ...this.p.wind });
     this.chimes = new ChimeSynth(fs, seed, { ...DEFAULT_CHIME_PARAMS, ...this.p.chimes, scale });
+    this.fire = new FireSynth(fs, seed, { ...DEFAULT_FIRE_PARAMS, ...this.p.fire });
     this.music = new MusicSynth(fs, seed, { ...DEFAULT_MUSIC_PARAMS, ...this.p.music, scale });
     this.reverb = new Reverb(fs, { ...DEFAULT_REVERB_PARAMS, ...this.p.reverb });
     this.rain.setExternalGust(0);
@@ -163,12 +173,13 @@ export class WorldSynth {
     // The world owns the scale; per-layer scale fields are ignored.
     if (patch.chimes) this.chimes.setParams(withoutScale(patch.chimes));
     if (patch.music) this.music.setParams(withoutScale(patch.music));
+    if (patch.fire) this.fire.setParams(patch.fire);
     if (patch.reverb) this.reverb.setParams(patch.reverb);
   }
 
   drainEvents(): WorldEvents {
     const e = this.events;
-    this.events = { rain: [], chimes: [], music: [] };
+    this.events = { rain: [], chimes: [], fire: [], music: [] };
     return e;
   }
 
@@ -208,17 +219,22 @@ export class WorldSynth {
     // 2. The rest.
     this.rain.process(b.rainL, b.rainR, frames);
     this.chimes.process(b.chimeL, b.chimeR, frames);
+    // Fire: fanned by the gusts, sizzling when it rains.
+    this.fire.setWind(this.wind.speed, this.wind.gust);
+    this.fire.setRain(this.p.mix.rain.on ? this.rain.params.rate : 0);
+    this.fire.process(b.fireL, b.fireR, frames);
     this.music.process(b.musicL, b.musicR, b.mSendL, b.mSendR, frames);
 
     // 3. Mix with smoothed gains; build the reverb send.
     const smooth = 1 - Math.exp(-1 / (0.15 * fs));
-    const t = { rain: this.targetGain('rain'), wind: this.targetGain('wind'), chimes: this.targetGain('chimes'), music: this.targetGain('music') };
+    const t = { rain: this.targetGain('rain'), wind: this.targetGain('wind'), chimes: this.targetGain('chimes'), fire: this.targetGain('fire'), music: this.targetGain('music') };
     const sRain = this.p.mix.rain.send;
     const sWind = this.p.mix.wind.send;
     const sChime = this.p.mix.chimes.send;
+    const sFire = this.p.mix.fire.send;
     const sMusic = this.p.mix.music.send;
-    const sq = { rain: 0, wind: 0, chimes: 0, music: 0 };
-    let gR = this.gainCur.rain, gW = this.gainCur.wind, gC = this.gainCur.chimes, gM = this.gainCur.music;
+    const sq = { rain: 0, wind: 0, chimes: 0, fire: 0, music: 0 };
+    let gR = this.gainCur.rain, gW = this.gainCur.wind, gC = this.gainCur.chimes, gF = this.gainCur.fire, gM = this.gainCur.music;
 
     // Blend and support: music and ambience trims, and a presence-driven dip in the ambience.
     const blend = Math.max(0, Math.min(1, this.p.bus.blend));
@@ -238,23 +254,27 @@ export class WorldSynth {
       gR += (t.rain - gR) * smooth;
       gW += (t.wind - gW) * smooth;
       gC += (t.chimes - gC) * smooth;
+      gF += (t.fire - gF) * smooth;
       gM += (t.music - gM) * smooth;
       const rl = b.rainL[n] * gR, rr = b.rainR[n] * gR;
       const wl = b.windL[n] * gW, wr = b.windR[n] * gW;
       const cl = b.chimeL[n] * gC, cr = b.chimeR[n] * gC;
+      const fl = b.fireL[n] * gF, fr = b.fireR[n] * gF;
       const ml = b.musicL[n] * gM * mt, mr = b.musicR[n] * gM * mt;
-      outL[n] = this.carveL.run(rl + wl + cl) * duck + ml;
-      outR[n] = this.carveR.run(rr + wr + cr) * duck + mr;
-      b.sendL[n] = (rl * sRain + wl * sWind + cl * sChime) * this.ambTrim + b.mSendL[n] * gM * mt * sMusic;
-      b.sendR[n] = (rr * sRain + wr * sWind + cr * sChime) * this.ambTrim + b.mSendR[n] * gM * mt * sMusic;
+      outL[n] = this.carveL.run(rl + wl + cl + fl) * duck + ml;
+      outR[n] = this.carveR.run(rr + wr + cr + fr) * duck + mr;
+      b.sendL[n] = (rl * sRain + wl * sWind + cl * sChime + fl * sFire) * this.ambTrim + b.mSendL[n] * gM * mt * sMusic;
+      b.sendR[n] = (rr * sRain + wr * sWind + cr * sChime + fr * sFire) * this.ambTrim + b.mSendR[n] * gM * mt * sMusic;
       sq.rain += rl * rl + rr * rr;
       sq.wind += wl * wl + wr * wr;
       sq.chimes += cl * cl + cr * cr;
+      sq.fire += fl * fl + fr * fr;
       sq.music += ml * ml + mr * mr;
     }
     this.gainCur.rain = gR;
     this.gainCur.wind = gW;
     this.gainCur.chimes = gC;
+    this.gainCur.fire = gF;
     this.gainCur.music = gM;
 
     // 4. Shared space.
@@ -275,6 +295,8 @@ export class WorldSynth {
     this.events.music.push(...ev);
     this.events.rain.push(...this.rain.drainEvents());
     this.events.chimes.push(...this.chimes.drainEvents());
+    this.events.fire.push(...this.fire.drainEvents());
+    if (this.events.fire.length > 400) this.events.fire.splice(0, this.events.fire.length - 400);
     // Keep event queues bounded if nobody drains them.
     if (this.events.rain.length > 2000) this.events.rain.splice(0, this.events.rain.length - 2000);
 
@@ -297,6 +319,7 @@ export function mergeWorld(base: WorldParams, patch: WorldParamsPatch): WorldPar
     rain: { ...base.rain, ...(patch.rain ?? {}) },
     wind: { ...base.wind, ...(patch.wind ?? {}) },
     chimes: { ...base.chimes, ...(patch.chimes ?? {}) },
+    fire: { ...base.fire, ...(patch.fire ?? {}) },
     music: { ...base.music, ...(patch.music ?? {}) },
     reverb: { ...base.reverb, ...(patch.reverb ?? {}) },
   };

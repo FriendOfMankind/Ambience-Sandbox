@@ -1,4 +1,5 @@
 import type { ChimeParams } from '../../src/audio/nature/chimes/ChimeSynth';
+import { DEFAULT_FIRE_PARAMS, type FireParams } from '../../src/audio/nature/fire/FireSynth';
 import { VOICING_ORDER, type MusicParams } from '../../src/audio/music/MusicSynth';
 import type { RainParams } from '../../src/audio/nature/rain/RainSynth';
 import type { ReverbParams } from '../../src/audio/dsp/Reverb';
@@ -34,6 +35,7 @@ export interface Scene {
   rain?: Partial<RainParams>;
   wind?: Partial<WindParams>;
   chimes?: Partial<ChimeParams>;
+  fire?: Partial<FireParams>;
   music?: Partial<MusicParams>;
   reverb?: Partial<ReverbParams>;
 }
@@ -84,6 +86,7 @@ export function sceneState(scene: Scene): SceneState {
     rain: { ...rainDefaults, ...scene.rain },
     wind: { ...DEFAULT_WIND_PARAMS, ...scene.wind },
     chimes: { ...chimeDefaults, ...scene.chimes },
+    fire: { ...DEFAULT_FIRE_PARAMS, ...scene.fire },
     music: { ...musicDefaults, ...mood, ...scene.music },
     reverb: { ...DEFAULT_REVERB_PARAMS, ...(key ? sp.reverb : {}), ...scene.reverb },
   });
@@ -101,6 +104,7 @@ export function stateToPatch(st: SceneState): WorldParamsPatch {
     rain: { ...w.rain, scale: { ...scale, enabled: st.rainInKey } },
     wind: w.wind,
     chimes: w.chimes,
+    fire: w.fire,
     music: w.music,
     reverb: w.reverb,
   };
@@ -175,6 +179,21 @@ export const SCENES: Scene[] = [
     music: { plucksLevel: 0.9, keysLevel: 0.5, pianoLevel: 0.5, padLevel: 0.6, droneLevel: 0.4, choirLevel: 0, bowlsLevel: 0.3, density: 12, breath: 0.4, brightness: 0.6, rhythm: 'loops', beat: 0, voicing: 'add9', layers: 0.35, decay: 0.3, texture: 0.25 },
   },
 
+  {
+    label: 'Hearth',
+    group: 'Calm',
+    blurb: 'A crackling fire, rain on the window, soft piano and a warm drone. Turn the Fire dial for embers or a roaring hearth.',
+    key: { root: 3, family: 'modes', light: 0.55, purity: 0.9 },
+    space: 0.45,
+    trip: 0.35,
+    mix: { rain: on(0.7), wind: on(0.25), chimes: off, fire: on(0.9), music: on() },
+    bus: { blend: 0.45 },
+    rain: { rate: 4, surfaceMix: surfaces({ glass: 0.8, tin: 0.2 }) },
+    wind: { amount: 0.2 },
+    fire: { amount: 0.55, crackle: 0.55, roar: 0.45 },
+    music: { pianoLevel: 0.8, droneLevel: 0.5, padLevel: 0.5, choirLevel: 0, keysLevel: 0, plucksLevel: 0, bowlsLevel: 0, density: 4, breath: 0.7, brightness: 0.25, rhythm: 'free', voicing: 'add9', swell: 0.15, age: 0.2, layers: 0.25 },
+  },
+
   // ---------------------------------------------------------------- moody
   {
     label: 'Rain study (lo-fi)',
@@ -237,6 +256,19 @@ export const SCENES: Scene[] = [
     wind: { amount: 0.85, gustiness: 0.9, whistle: 0.6, rustle: 0.7 },
     chimes: { activity: 1.5 },
     music: { droneLevel: 1, padLevel: 0.9, choirLevel: 0.3, keysLevel: 0, plucksLevel: 0.2, pianoLevel: 0.4, bowlsLevel: 0.4, density: 3, breath: 0.8, brightness: 0.2, chordSeconds: 50, beat: 0, voicing: 'sus4', pedal: true, age: 0.15, layers: 0.3 },
+  },
+
+  {
+    label: 'Campfire under the planet',
+    group: 'Moody',
+    blurb: 'An open fire on the shore with a breeze fanning it, plucked strings and a slow heartbeat. Gusts make it roar.',
+    key: { root: 9, family: 'pentatonic', light: 0.2, purity: 0.8 },
+    space: 0.7,
+    trip: 0.55,
+    mix: { rain: off, wind: on(0.45), chimes: on(0.4), fire: on(1), music: on() },
+    wind: { amount: 0.45, gustiness: 0.8 },
+    fire: { amount: 0.7, crackle: 0.65, roar: 0.6 },
+    music: { plucksLevel: 0.8, droneLevel: 0.5, padLevel: 0.4, choirLevel: 0.3, keysLevel: 0, pianoLevel: 0, bowlsLevel: 0, beat: 0.2, tempo: 60, rhythm: 'free', density: 6, breath: 0.6, brightness: 0.3, voicing: 'sus2', layers: 0.35, decay: 0.5 },
   },
 
   // ---------------------------------------------------------------- playful
@@ -428,7 +460,8 @@ export function randomVibe(rnd: () => number = Math.random): Scene {
     key: { root: Math.floor(rnd() * 12), family, light: +rnd().toFixed(2), purity: family === 'cluster' ? 0.2 : +between(0.5, 1).toFixed(2) },
     space: +between(0.35, 1).toFixed(2),
     trip: +between(0.35, 0.9).toFixed(2),
-    mix: { rain: rain ? on(+between(0.4, 1.2).toFixed(2)) : off, wind: on(+between(0.2, 0.6).toFixed(2)), chimes: chance(0.35) ? on(0.7) : off, music: on() },
+    mix: { rain: rain ? on(+between(0.4, 1.2).toFixed(2)) : off, wind: on(+between(0.2, 0.6).toFixed(2)), chimes: chance(0.35) ? on(0.7) : off, fire: chance(0.25) ? on(0.85) : off, music: on() },
+    fire: { amount: +between(0.3, 0.8).toFixed(2), crackle: +between(0.3, 0.8).toFixed(2), roar: +between(0.2, 0.7).toFixed(2) },
     rain: { rate: +between(0.5, 10).toFixed(1), surfaceMix: surfaces({ [surface]: 1, water: 0.3 }) },
     wind: { amount: +between(0.1, 0.6).toFixed(2), gustiness: +between(0.3, 0.8).toFixed(2) },
     music,

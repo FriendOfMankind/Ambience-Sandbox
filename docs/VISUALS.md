@@ -20,6 +20,8 @@ The user found the old contour hills and floating chime rods underwhelming. They
 
 - **Screensaver** (added after Phase 1): the top-bar button or H hides every control, and requests fullscreen where the browser allows. Esc, H or the exit pill (shown when the pointer moves) leaves it. It starts automatically after 3 idle minutes while playing; this can be switched off in Advanced and is remembered per browser.
 
+- **Fire** (added after the screensaver): when the fire layer is on, 900 ember points rise and cool around the object (density follows the Fire dial). Pops and the strongest crackles kick their glow, slewed (rise about 0.2 s, release 1 s) so they can't strobe; Freeze stops them. The fog gains a faint, steady warm tint. Embers are left out of the reflection pass. Covered by the flash-check scenario "roaring fire: 6 pops/s, full embers".
+
 **Next:** Phase 2 (grass, bushes, conifers pushed by the wind; streams, waterfalls, snowfall, splashes), Phase 3 (Perform processors glitch the world), Phase 4 (wildlife).
 
 ## Rule
@@ -34,6 +36,7 @@ Every bright or fast thing on screen is caused by a sound event. Slow ambient dr
 | Music: bowls and beat | The object's skin | Bowl strike: a cymatic (Chladni-style) nodal pattern for its pitch class rings across the skin, decaying with the bowl. Kick: the object swells slightly with a slow release | |
 | Chimes (ambience) | Rods along the far shore | Strike: the rod glows in its pitch hue | Wind: the rods sway and lean |
 | Rain | The lake and the air | Near drop: a ripple on the lake (x = pan, size = diameter). Surface sets the character: water gives double rings, leaves/grass soft splats, stone/tin/glass sharp fast ticks, "Bells" rings in the bubble's pitch hue | Rain rate: streak density and a wetter, glossier landscape |
+| Fire (ambience) | Embers in the air | Pop or loud crackle: the embers flare (slewed) | Amount: ember density and a warm tint in the fog |
 | Wind | The air | (none: wind is continuous) | Speed: curl-noise haze, aurora in the sky, how fast the trails swirl. Gust: bends the object downwind and domain-warps the contour hills |
 
 Pitch class → hue is shared everywhere (`pitchHue`), so the same note is the same colour whether it's a chime, a key or a bell drop.

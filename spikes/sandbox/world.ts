@@ -231,6 +231,7 @@ export class World {
       uCam: { value: new THREE.Vector3() },
       uFogDensity: { value: 0.0022 },
       uClipBelow: { value: -1e9 },
+      uFire: { value: 0 },
     };
 
     // Bake the height maps once.

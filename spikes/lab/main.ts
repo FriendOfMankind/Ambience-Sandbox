@@ -494,7 +494,7 @@ function renderTransport(): void {
   }
 }
 
-const layerName: Record<LayerId, string> = { rain: 'Rain', wind: 'Wind', chimes: 'Chimes', music: 'Music' };
+const layerName: Record<LayerId, string> = { rain: 'Rain', wind: 'Wind', chimes: 'Chimes', fire: 'Fire', music: 'Music' };
 
 function renderLive(): void {
   const clock = document.getElementById('clock');

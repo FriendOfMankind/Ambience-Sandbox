@@ -31,7 +31,7 @@ import { World, type Quality } from './world';
 
 
 /** Hue of each layer's controls and edit glow (degrees). */
-export const LAYER_HUE: Record<LayerId, number> = { rain: 196, wind: 152, chimes: 42, music: 318 };
+export const LAYER_HUE: Record<LayerId, number> = { rain: 196, wind: 152, chimes: 42, fire: 22, music: 318 };
 
 export interface VisualWorld {
   rainRate: number;
@@ -44,6 +44,8 @@ export interface VisualWorld {
   age: number;
   texture: number;
   freeze: boolean;
+  /** Fire amount (0 = out): embers and a faint warm glow on the land. */
+  fire: number;
 }
 
 const TUBES_MAX = 8;
@@ -71,6 +73,7 @@ const FRAMING: Record<LayerId | 'none', [number, number, number]> = {
   chimes: [10, 3.4, 5],
   rain: [9, 1.7, 0],
   wind: [12, 6, 0],
+  fire: [8, 2.2, -3],
 };
 
 const named = <T extends THREE.Object3D>(name: string, o: T): T => { o.name = name; return o; };
@@ -154,12 +157,17 @@ export class SceneView3D {
   private landAmt = 0;
   private rain: THREE.Object3D | null = null;
   private haze: THREE.Object3D | null = null;
+  private embers: THREE.Object3D | null = null;
+  private readonly emberMat: THREE.ShaderMaterial;
+  private emberKick = 0;
+  private emberE = 0;
+  private emberTime = 0;
 
   // world state, smoothed
   private queue: { time: number; fn: () => void }[] = [];
   private qHead = 0;
   private features: WorldFeatures | null = null;
-  private world: VisualWorld = { rainRate: 5, windAmount: 0.3, sustain: 1, chordSeconds: 35, layers: 0, age: 0, texture: 0, freeze: false };
+  private world: VisualWorld = { rainRate: 5, windAmount: 0.3, sustain: 1, chordSeconds: 35, layers: 0, age: 0, texture: 0, freeze: false, fire: 0 };
   private frozen = 0;
   private tubeHz: number[] = [];
   /** Bowl strikes → cymatic patterns on the shell, one slot per pitch class group. */
@@ -176,7 +184,7 @@ export class SceneView3D {
   private ripTokens = 10;
   private hue = 0.52;
   private hueTarget = 0.52;
-  private levels: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
+  private levels: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, fire: 0, music: 0 };
   private wind = 0;
   private gust = 0;
   private windPhase = 0;
@@ -190,7 +198,7 @@ export class SceneView3D {
   private attrDTarget = 3.5;
   private attrBoost = 0;
   private attrGlow = 0;
-  private edit: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, music: 0 };
+  private edit: Record<LayerId, number> = { rain: 0, wind: 0, chimes: 0, fire: 0, music: 0 };
   private focus: LayerId | null = null;
   private editing = new Set<LayerId>();
   private lastEditRipple = 0;
@@ -379,6 +387,22 @@ export class SceneView3D {
     this.bg.add(haze);
     this.haze = haze;
 
+    // Embers.
+    const E = 900;
+    const es = new Float32Array(E * 4);
+    const er = mulberry(31);
+    for (let i = 0; i < E; i++) es.set([(er() - 0.5) * 36, (er() - 0.5) * 36, er(), 0.6 + er() * 0.8], i * 4);
+    const emberGeo = new THREE.BufferGeometry();
+    emberGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(E * 3), 3));
+    emberGeo.setAttribute('aSeed', new THREE.BufferAttribute(es, 4));
+    this.emberMat = mat(S.EMBER_VERT, S.EMBER_FRAG, { uTime: { value: 0 }, uDensity: { value: 0 }, uWindPhase: { value: 0 }, uPixel: { value: 1 }, uCenter: { value: new THREE.Vector3() }, uGlow: { value: 0 } });
+    const embers = new THREE.Points(emberGeo, this.emberMat);
+    embers.frustumCulled = false;
+    embers.renderOrder = 3;
+    embers.name = 'embers';
+    this.bg.add(embers);
+    this.embers = embers;
+
     // ---------------------------------------------------------------- post
     const quadMat = (fragmentShader: string, uniforms: Record<string, THREE.IUniform>) =>
       new THREE.ShaderMaterial({ vertexShader: S.QUAD_VERT, fragmentShader, uniforms, depthTest: false, depthWrite: false });
@@ -498,6 +522,9 @@ export class SceneView3D {
       const t = timeOf(e.frame);
       this.queue.push({ time: t, fn: () => this.addRipple(e.pan, e.diameterMm, e.surface, e.bubbleHz, e.frame) });
     }
+    for (const e of events.fire ?? []) {
+      this.queue.push({ time: timeOf(e.frame), fn: () => (this.emberKick = Math.max(this.emberKick, e.velocity)) });
+    }
     for (const e of events.chimes) {
       this.queue.push({ time: timeOf(e.frame), fn: () => { if (e.tube < TUBES_MAX) this.chimeKick[e.tube] = Math.max(this.chimeKick[e.tube], e.velocity); } });
     }
@@ -599,6 +626,7 @@ export class SceneView3D {
     this.fbMat.uniforms.uAspect.value = w / h;
     this.finalMat.uniforms.uAspect.value = w / h;
     this.hazeMat.uniforms.uPixel.value = s;
+    this.emberMat.uniforms.uPixel.value = s;
     this.attrMats.forEach((m) => (m.uniforms.uPixel.value = s * Math.min(1.4, h / 700)));
   }
 
@@ -639,7 +667,7 @@ export class SceneView3D {
 
     // Levels and wind.
     const f = this.features;
-    for (const id of ['rain', 'wind', 'chimes', 'music'] as LayerId[]) this.levels[id] = ease(this.levels[id], norm(f?.level[id] ?? 0), dt, 0.35);
+    for (const id of ['rain', 'wind', 'chimes', 'fire', 'music'] as LayerId[]) this.levels[id] = ease(this.levels[id], norm(f?.level[id] ?? 0), dt, 0.35);
     this.wind = ease(this.wind, f?.windSpeed ?? this.world.windAmount * 0.5, dt, 0.4);
     this.gust = ease(this.gust, f?.gust ?? 0, dt, 0.3);
     const motion = rm ? 0.3 : 1;
@@ -647,7 +675,7 @@ export class SceneView3D {
     this.gustPhase += dt * (0.3 + this.wind * 1.5) * motion;
 
     // Edit emphasis: rises while a control is being changed or focused, then settles.
-    for (const id of ['rain', 'wind', 'chimes', 'music'] as LayerId[]) {
+    for (const id of ['rain', 'wind', 'chimes', 'fire', 'music'] as LayerId[]) {
       const target = this.editing.has(id) ? 1 : this.focus === id ? 0.35 : 0;
       this.edit[id] = ease(this.edit[id], target, dt, target > this.edit[id] ? 0.15 : 0.7);
     }
@@ -757,6 +785,17 @@ export class SceneView3D {
     this.hazeMat.uniforms.uWindPhase.value = this.windPhase;
     this.hazeMat.uniforms.uWind.value = Math.min(1.2, this.wind);
     this.hazeMat.uniforms.uEdit.value = this.edit.wind;
+    // Embers: density follows the fire; pops brighten them through a slew (rise ≥ ~200 ms).
+    const fireOn = Math.max(this.world.fire, this.levels.fire > 0.05 ? 0.3 : 0) * (this.levels.fire > 0.01 ? 1 : 0);
+    this.emberKick *= Math.exp(-dt / 0.15);
+    this.emberE = this.emberKick > this.emberE ? this.emberE + Math.min(this.emberKick - this.emberE, dt * 5) : this.emberE * Math.exp(-dt / 1.0);
+    this.emberTime += dt * motion * (1 - this.frozen);
+    const eu = this.emberMat.uniforms;
+    eu.uTime.value = this.emberTime;
+    eu.uDensity.value = Math.min(1, 0.15 + 0.85 * fireOn) * (fireOn > 0 ? 1 : 0);
+    eu.uWindPhase.value = this.windPhase;
+    eu.uGlow.value = (0.5 + 0.5 * fireOn + 0.4 * this.emberE) * this.guard * (1 + this.edit.fire);
+    this.world3d.light.uFire.value = ease(this.world3d.light.uFire.value as number, fireOn, dt, 1.5);
 
     // Travel: the object follows the valley, gliding over water, rolling and hopping on land.
     const path = this.world3d.path;
@@ -811,13 +850,14 @@ export class SceneView3D {
     this.world3d.update(this.camera, now, this.hue, sat, wet);
     (this.rainMat.uniforms.uCenter.value as THREE.Vector3).copy(this.camPos);
     (this.hazeMat.uniforms.uCenter.value as THREE.Vector3).copy(this.camPos);
+    (this.emberMat.uniforms.uCenter.value as THREE.Vector3).copy(this.camPos);
 
     // ---------------------------------------------------------------- render
     const r = this.renderer;
     const c = this.objPos.clone().project(this.camera);
     (this.fbMat.uniforms.uCenter.value as THREE.Vector2).set(c.x * 0.5 + 0.5, c.y * 0.5 + 0.5);
     const rs = this.pinnedScale ?? this.scale;
-    this.world3d.renderReflection(this.camera, [this.bg, this.fg], [this.world3d.water, this.rain!, this.haze!], this.width * rs, this.height * rs, this.objectDims);
+    this.world3d.renderReflection(this.camera, [this.bg, this.fg], [this.world3d.water, this.rain!, this.haze!, this.embers!], this.width * rs, this.height * rs, this.objectDims);
 
     r.setRenderTarget(this.rt.bg);
     r.render(this.bg, this.camera);

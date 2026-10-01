@@ -20,9 +20,10 @@ Tarn Sandbox is a browser toy: generative ambient music with natural ambience (r
    - visuals v1 (object and floating dials)
    - music engine v2: 7 voices, mood and movement dials, Music/Ambience split, Blend
    - Perform processors: looper, tape Age, grains, Swell, Freeze, Orbit, piano, voicings
-   - 22 vibes plus Surprise me
+   - 24 vibes plus Surprise me
    - world v2 phase 1: valley, lakes with reflection, ringed-planet sky, chime trees, object travel, Trip fold fix
    - screensaver mode
+   - **fire layer** (ambience, off by default): procedural crackle, pops, roar and hiss (`src/audio/nature/fire/FireSynth.ts`), fanned by wind gusts and sizzling in rain. Its dial is Fire in the Ambience cluster (0 = off), with Crackle, Roar and Tone under More. In the world it shows as embers rising around the object (pops kick them) and a faint warm glow in the fog. New vibes: "Hearth" (Calm) and "Campfire under the planet" (Moody); Surprise me lights a fire 25% of the time. **Unheard: tuned by measurement only.**
 
 ## 2. The user and how to work with them
 
@@ -41,7 +42,7 @@ Tarn Sandbox is a browser toy: generative ambient music with natural ambience (r
 | `src/audio/music/voices.ts` | Drone, Bowls, Plucks (Karplus–Strong), Piano, Choir (formants), Beat (lo-fi), Shimmer, Biquad |
 | `src/audio/music/fx.ts` | Looper (sound-on-sound), Tape (Age), Granular (Texture) |
 | `src/audio/music/scales.ts` | `buildScale` (root, family, Light → mode, Purity → just intonation, 432 Hz) |
-| `src/audio/nature/*` | Rain, wind, chimes (session 1) |
+| `src/audio/nature/*` | Rain, wind, chimes (session 1); fire (session 2, `fire/FireSynth.ts`) |
 | `spikes/sandbox/main.ts` | UI: dial clusters (Mood, Movement, Instruments, Perform, Ambience), Advanced drawer, vibes, Surprise me, screensaver |
 | `spikes/sandbox/scenes.ts` | Vibes (`SCENES`), `randomVibe`, state ↔ worklet patch, the Space and Purity macros |
 | `spikes/sandbox/view3d.ts` | The view: object, event → visual mapping, travel and camera, post (feedback, fold, bloom), flash guard |
@@ -54,7 +55,7 @@ Tarn Sandbox is a browser toy: generative ambient music with natural ambience (r
 ## 4. Build, test, verify
 
 - `npm test`: 66 tests, about 3 minutes; the Lab render test is the slow one (300 s timeout).
-- `npm run build:artifact` → `dist-artifact/sandbox.html` (about 766 KB, single file).
+- `npm run build:artifact` → `dist-artifact/sandbox.html` (about 777 KB, single file).
 - `node scripts/flash-check.mjs`: renders the real scene on a fixed clock with worst-case event bursts. A deliberate strobe control **must fail** (it proves the meter works); every other scenario must stay at 3 flashes/s or below. Run it after any visual change.
 - `node scripts/visual-preview.mjs <outDir> [trip] [w] [h] [ui]`: deterministic stills. Environment variables: `SHOTS=40,90`, `SCALE=0.7`, `THETA=0.8` (jump along the path; 0 = the Tarn, about 0.17 = a chime tree, 0.8 = meadows), `HIDE=shell,cage,core,terrain,lake,sky,rain,haze,trees`, `TAG`.
 - `node scripts/visual-check.mjs <outDir> <sec>`: a real-time run with audio (checks for console errors).
@@ -99,7 +100,7 @@ Tarn Sandbox is a browser toy: generative ambient music with natural ambience (r
 ## 7. Decisions on record
 
 - Desktop first; non-commercial; rain fully synthetic.
-- Layers are Rain, Wind, Chimes (the ambience) plus Music.
+- Layers are Rain, Wind, Chimes, Fire (the ambience) plus Music. Fire is optional and off unless a vibe or the dial turns it on.
 - Visual direction (PLAN D10): a synaesthetic object plus floating dials.
 - Dials replace the old layer strips; every control is also in Advanced.
 - The kaleidoscope appears only at high Trip; Trip defaults to 60 (each vibe now suggests its own).

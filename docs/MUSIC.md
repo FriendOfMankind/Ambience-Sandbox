@@ -5,7 +5,7 @@ Status: built 2026-09-28, **not yet heard by the user**. Levels are matched by m
 ## The split
 
 - **Music** (drives the object): a generative ensemble with mood and movement dials.
-- **Ambience** (drives the background): rain, wind and chimes, sitting underneath.
+- **Ambience** (drives the background): rain, wind, chimes and an optional wood fire (crackles, pops, roar; wind fans it, rain sizzles on it), sitting underneath.
 - **Blend** sets the balance (0 = ambience only, 0.5 = both full, 1 = music only). **Support** makes the ambience step aside while music plays: a −6 dB dip around 900 Hz (wide) and up to −2.5 dB overall, scaled by how present the music is (`WorldSynth`, bus section).
 
 ## Research behind the choices
@@ -69,10 +69,10 @@ Measured (30 s renders): everything plus all processors comes to 8.5% of one cor
 
 ## Vibes
 
-22 vibes in five groups (`spikes/sandbox/scenes.ts`). Each has a one-line description of what to listen for and what to try, and a suggested visual Trip.
+24 vibes in five groups (`spikes/sandbox/scenes.ts`). Each has a one-line description of what to listen for and what to try, and a suggested visual Trip.
 
-- **Calm:** Deep rest, Airport at dawn (after Eno), Plateaux (soft piano, after Budd), Temple, Morning light
-- **Moody:** Rain study (lo-fi), Tape-deck jazz, Cassette memories (after Basinski), Night drift, Storm shelter
+- **Calm:** Deep rest, Airport at dawn (after Eno), Plateaux (soft piano, after Budd), Temple, Morning light, Hearth (fire)
+- **Moody:** Rain study (lo-fi), Tape-deck jazz, Cassette memories (after Basinski), Night drift, Storm shelter, Campfire under the planet
 - **Playful:** Glass garden, Heartbeat, Arcade after hours, Frozen lake
 - **Strange:** Underwater cathedral, Floating, Deep space, Fever dream, Strange weather
 - **Ambience only:** Summer storm, Breeze and chimes, Near silence

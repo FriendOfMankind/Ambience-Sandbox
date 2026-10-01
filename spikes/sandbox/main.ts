@@ -85,7 +85,7 @@ function send(patch: WorldParamsPatch): void {
 /** World state the visuals need beyond the engine's events (rain rate, chime ring time…). */
 function pushWorld(): void {
   const w = state.world;
-  view3d?.setWorld({ rainRate: w.rain.rate ?? 5, windAmount: w.wind.amount ?? 0.3, sustain: w.chimes.sustain ?? 1, chordSeconds: w.music.chordSeconds ?? 35, layers: w.music.layers ?? 0, age: w.music.age ?? 0, texture: w.music.texture ?? 0, freeze: !!w.music.freeze });
+  view3d?.setWorld({ rainRate: w.rain.rate ?? 5, windAmount: w.wind.amount ?? 0.3, sustain: w.chimes.sustain ?? 1, chordSeconds: w.music.chordSeconds ?? 35, layers: w.music.layers ?? 0, age: w.music.age ?? 0, texture: w.music.texture ?? 0, freeze: !!w.music.freeze, fire: w.mix.fire.on ? w.fire.amount ?? 0.5 : 0 });
 }
 
 async function togglePlay(): Promise<void> {
@@ -216,6 +216,7 @@ const LAYER_INFO: Record<LayerId, { title: string; blurb: string }> = {
   rain: { title: 'Rain', blurb: 'Every drop synthesised: size, surface, distance.' },
   wind: { title: 'Wind', blurb: 'Also moves the rain and swings the chimes.' },
   chimes: { title: 'Wind chimes', blurb: 'Tuned to the key. Only ring when the wind reaches them.' },
+  fire: { title: 'Fire', blurb: 'A crackling wood fire. Gusts fan it; rain makes the embers sizzle.' },
   music: { title: 'Music', blurb: 'A generative ensemble; it shapes and colours the object.' },
 };
 
@@ -371,7 +372,7 @@ function buildStrips(): void {
   slider(bus.main, { id: 'bus-blend', label: 'Blend', min: 0, max: 1, step: 0.01, get: () => w().bus.blend, set: (v) => (w().bus.blend = v), fmt: blendWord }, () => send({ bus: w().bus }));
   slider(bus.main, { id: 'bus-support', label: 'Ambience steps aside for music', min: 0, max: 1, step: 0.01, get: () => w().bus.support, set: (v) => (w().bus.support = v), fmt: pct }, () => send({ bus: w().bus }));
 
-  for (const id of ['rain', 'wind', 'chimes'] as const) {
+  for (const id of ['rain', 'wind', 'chimes', 'fire'] as const) {
     currentLayer = id;
     const { main, more } = strip(ambRoot, LAYER_INFO[id].title, LAYER_INFO[id].blurb, id);
     slider(main, { id: `${id}-level`, label: 'Level', min: 0, max: 2, step: 0.01, get: () => w().mix[id].level, set: (v) => (w().mix[id].level = v), fmt: levelFmt }, mixChange(id));
@@ -405,6 +406,17 @@ function buildStrips(): void {
       slider(main, { id: 'wind-rustle', label: 'Leaves', min: 0, max: 1, step: 0.01, get: () => x().rustle!, set: (v) => (x().rustle = v), fmt: pct }, ch);
       slider(more, { id: 'wind-whistle', label: 'Whistle', min: 0, max: 1, step: 0.01, get: () => x().whistle!, set: (v) => (x().whistle = v), fmt: pct }, ch);
       slider(more, { id: 'wind-tone', label: 'Tone', min: -1, max: 1, step: 0.01, get: () => x().tone!, set: (v) => (x().tone = v), fmt: (v) => (Math.abs(v) < 0.02 ? 'natural' : v < 0 ? 'darker' : 'brighter') }, ch);
+    }
+
+    if (id === 'fire') {
+      const f = () => w().fire;
+      // The Fire dial doubles as its on switch: above zero lights it, zero puts it out.
+      const lit = () => { send({ fire: w().fire, mix: { fire: { on: w().mix.fire.on } } }); changed('on-fire'); };
+      slider(main, { id: 'fire-amount', label: 'Fire', min: 0, max: 1, step: 0.01, get: () => (w().mix.fire.on ? f().amount ?? 0.5 : 0), set: (v) => { f().amount = Math.max(0.02, v); w().mix.fire.on = v > 0.01; }, fmt: (v) => (v < 0.01 ? 'out' : v < 0.3 ? 'embers' : v < 0.65 ? 'campfire' : 'roaring hearth') }, lit);
+      const ch = () => send({ fire: w().fire });
+      slider(main, { id: 'fire-crackle', label: 'Crackle', min: 0, max: 1, step: 0.01, get: () => f().crackle ?? 0.5, set: (v) => (f().crackle = v), fmt: pct }, ch);
+      slider(main, { id: 'fire-roar', label: 'Roar', min: 0, max: 1, step: 0.01, get: () => f().roar ?? 0.5, set: (v) => (f().roar = v), fmt: pct }, ch);
+      slider(more, { id: 'fire-tone', label: 'Tone', min: -1, max: 1, step: 0.01, get: () => f().tone ?? 0, set: (v) => (f().tone = v), fmt: (v) => (Math.abs(v) < 0.02 ? 'natural' : v < 0 ? 'darker' : 'brighter') }, ch);
     }
 
     if (id === 'chimes') {
@@ -575,7 +587,7 @@ const CLUSTERS: { id: string; title: string; layer: LayerId; hue: number; power?
   { id: 'perf', title: 'Perform', layer: 'music', hue: 38, freeze: true, dials: ['perf-layers', 'perf-decay', 'perf-age', 'perf-texture', 'perf-swell'] },
   { id: 'move', title: 'Movement', layer: 'music', hue: 285, dials: ['move-motion', 'move-breath', 'move-rhythm', 'move-tempo', 'move-beat'] },
   { id: 'inst', title: 'Instruments', layer: 'music', hue: 340, small: true, dials: ['voice-drone', 'voice-pad', 'voice-piano', 'voice-bowls', 'voice-keys', 'voice-plucks', 'voice-choir'] },
-  { id: 'amb', title: 'Ambience', layer: 'rain', hue: 172, dials: ['bus-blend', 'rain-rate', 'wind-amount', 'chimes-level'], labels: { 'wind-amount': 'Wind', 'chimes-level': 'Chimes' } },
+  { id: 'amb', title: 'Ambience', layer: 'rain', hue: 172, dials: ['bus-blend', 'rain-rate', 'wind-amount', 'chimes-level', 'fire-amount'], labels: { 'wind-amount': 'Wind', 'chimes-level': 'Chimes' } },
 ];
 const clusters: { id: string; el: HTMLElement }[] = [];
 

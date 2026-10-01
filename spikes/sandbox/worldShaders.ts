@@ -98,7 +98,9 @@ uniform vec3 uSkyHorizon;
 uniform vec3 uCam;
 uniform float uFogDensity;
 uniform float uClipBelow; // discard anything under this height (reflection pass)
+uniform float uFire;      // a faint, steady warm glow while the fire burns (never flickers)
 vec3 fogIt(vec3 col, vec3 wp){
+  col += vec3(1.0, 0.42, 0.12) * uFire * 0.025 * exp(-length(wp - uCam) * 0.02);
   float d = length(wp - uCam);
   float f = 1.0 - exp(-d * uFogDensity);
   // Low mist over water and valley floors.

@@ -349,6 +349,45 @@ void main(){ gl_FragColor = vec4(hsv(vec3(uHue + 0.5, 0.2, 1.0)) * 0.05 * vFade 
 `;
 
 /** Wind haze: points carried by the wind through a curl-noise field. */
+/** Embers: sparks rising and swirling around the camera while the fire burns, cooling as they climb. */
+export const EMBER_VERT = /* glsl */ `
+attribute vec4 aSeed;   // x, z (box offsets), phase, speed
+uniform float uTime;
+uniform float uDensity;
+uniform float uWindPhase;
+uniform float uPixel;
+uniform vec3 uCenter;
+varying float vHeat;
+varying float vArea;
+void main(){
+  float idx = fract(aSeed.z * 7.13);
+  if (idx > uDensity) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  float life = fract(aSeed.z + uTime * aSeed.w * 0.07);
+  vec2 rel = mod(aSeed.xy + vec2(uWindPhase * 0.4, 0.0) - uCenter.xz + 18.0, 36.0) - 18.0;
+  vec3 p = vec3(uCenter.x + rel.x, uCenter.y - 3.5 + life * 12.0, uCenter.z + rel.y);
+  p.x += sin(uTime * 0.9 + aSeed.z * 40.0) * 0.6 * life;
+  p.z += cos(uTime * 0.7 + aSeed.w * 30.0) * 0.6 * life;
+  vHeat = (1.0 - life) * smoothstep(0.0, 0.08, life);
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  // At least 1.5 px, dimmed by the area gained, so sparks never shimmer.
+  float sz = 3.0 * uPixel / max(1.0, -mv.z * 0.35);
+  vArea = min(1.0, sz * sz / 2.25);
+  gl_PointSize = max(1.5, sz);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+export const EMBER_FRAG = /* glsl */ `
+uniform float uGlow;
+varying float vHeat;
+varying float vArea;
+void main(){
+  vec2 c = gl_PointCoord - 0.5;
+  float a = smoothstep(0.25, 0.0, dot(c, c));
+  vec3 col = mix(vec3(0.9, 0.18, 0.02), vec3(1.0, 0.7, 0.3), vHeat);
+  gl_FragColor = vec4(col * a * vArea * vHeat * uGlow, 1.0);
+}
+`;
+
 export const HAZE_VERT = /* glsl */ `
 ${NOISE}
 uniform float uTime;
